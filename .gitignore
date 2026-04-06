@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# Assignment runtime artifacts
+w2-ai-product/outputs/*
+!w2-ai-product/outputs/.gitkeep
+!w2-ai-product/outputs/html/
+w2-ai-product/outputs/html/*
+!w2-ai-product/outputs/html/.gitkeep
+!w2-ai-product/outputs/reports/
+w2-ai-product/outputs/reports/*
+!w2-ai-product/outputs/reports/.gitkeep
+w2-ai-product/mlruns/
