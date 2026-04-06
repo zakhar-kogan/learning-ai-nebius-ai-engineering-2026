@@ -1,0 +1,19 @@
+[project]
+name = "learning-ai-nebius"
+version = "0.1.0"
+description = "Nebius AI Engineering course assignments"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm",
+    "pydantic",
+    "pandas",
+    "openpyxl",
+    "python-dotenv",
+    "mlflow",
+    "tqdm",
+    "tenacity",
+    "marimo",
+]
+
+[tool.uv]
+dev-dependencies = []

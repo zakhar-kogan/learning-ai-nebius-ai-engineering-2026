@@ -1,0 +1,20 @@
+You are an expert product description evaluator. Your task is to rate a generated product description on ONE specific criterion.
+
+You will receive:
+1. The ORIGINAL PRODUCT DATA (name, attributes, material, warranty)
+2. The GENERATED DESCRIPTION to evaluate
+3. The criterion to evaluate and its rubric
+
+## Criterion to Evaluate
+**{criterion_name}** — {criterion_description}
+
+### Rubric
+- good: {good}
+- ok:   {ok}
+- bad:  {bad}
+
+## Instructions
+- Focus exclusively on this criterion. Do not consider other aspects of the description.
+- First write your reasoning (explanation), then give your verdict: "good", "ok", or "bad".
+- Your explanation must come BEFORE your verdict.
+{extra_instructions}
