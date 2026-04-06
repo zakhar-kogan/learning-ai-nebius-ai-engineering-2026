@@ -1,24 +1,18 @@
 """
-utils.py — shared helpers for product formatting, cost calculation, async batching.
+utils.py — shared helpers for product formatting, cost calculation, and async batching.
 """
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import asyncio
-import time
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar, cast
 
 import litellm
 from tqdm.asyncio import tqdm as atqdm
 
+from src.config import NEBIUS_RATE_COST_POLICY
 
-# ── Provider config ───────────────────────────────────────────────────────────
-# Change PROVIDER to "nvidia_nim" for dev (free, 40 RPM), "nebius" for final runs.
-GENERATION_PROVIDER = os.getenv("GENERATION_PROVIDER", "nebius")
-GENERATION_MODEL    = os.getenv("GENERATION_MODEL",    "meta-llama/Meta-Llama-3.1-8B-Instruct")
-JUDGE_PROVIDER      = os.getenv("JUDGE_PROVIDER",      "nebius")
-JUDGE_MODEL         = os.getenv("JUDGE_MODEL",         "google/gemma-2-9b-it")
+T = TypeVar("T")
+R = TypeVar("R")
+
 
 def get_model_string(provider: str, model: str) -> str:
     return f"{provider}/{model}"
@@ -45,15 +39,18 @@ def format_judge_input(product: dict, description: str) -> str:
 
 
 # ── Cost extraction ───────────────────────────────────────────────────────────
-# Nebius pricing fallback (per token)
-_NEBIUS_INPUT_PRICE  = 0.02 / 1_000_000   # $0.02 / 1M input tokens
-_NEBIUS_OUTPUT_PRICE = 0.06 / 1_000_000   # $0.06 / 1M output tokens
+# Explicit policy: normalize fallback cost accounting to Nebius-compatible rates
+# for equal models, even if a different provider handled the request.
+_NEBIUS_INPUT_PRICE = 0.02 / 1_000_000   # $0.02 / 1M input tokens
+_NEBIUS_OUTPUT_PRICE = 0.06 / 1_000_000  # $0.06 / 1M output tokens
 
 
 def extract_cost(response: Any, input_tokens: int, output_tokens: int) -> float:
     """
-    Extract cost from LiteLLM response. Falls back to hardcoded Nebius pricing.
-    LiteLLM stores cost in response._hidden_params['response_cost'].
+    Extract cost from a LiteLLM response.
+
+    If LiteLLM cannot provide a concrete response cost, fall back to the explicit
+    repo policy described in ``NEBIUS_RATE_COST_POLICY``.
     """
     try:
         cost = litellm.completion_cost(completion_response=response)
@@ -61,29 +58,32 @@ def extract_cost(response: Any, input_tokens: int, output_tokens: int) -> float:
             return cost
     except Exception:
         pass
-    # Fallback: manual calculation
+
+    _ = NEBIUS_RATE_COST_POLICY  # keep the policy import close to the fallback branch
     return (input_tokens * _NEBIUS_INPUT_PRICE) + (output_tokens * _NEBIUS_OUTPUT_PRICE)
 
 
 # ── Async batch runner ────────────────────────────────────────────────────────
 async def run_async_batch(
-    coro_fn,
-    items: list,
+    coro_fn: Callable[[T], Awaitable[R]],
+    items: list[T],
     max_concurrency: int = 5,
     desc: str = "Processing",
-) -> list:
+) -> list[R]:
     """
-    Run coro_fn(item) for each item, up to max_concurrency at a time.
-    Returns results in order.
+    Run ``coro_fn(item)`` for each item, up to ``max_concurrency`` at a time.
+
+    Returns results in the same order as ``items``.
     """
     semaphore = asyncio.Semaphore(max_concurrency)
+    results = cast(list[R | None], [None for _ in items])
 
-    async def bounded(item):
+    async def bounded(index: int, item: T) -> None:
         async with semaphore:
-            return await coro_fn(item)
+            results[index] = await coro_fn(item)
 
-    tasks = [bounded(item) for item in items]
-    results = []
-    for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc):
-        results.append(await coro)
-    return results
+    tasks = [asyncio.create_task(bounded(index, item)) for index, item in enumerate(items)]
+    for task in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc):
+        await task
+
+    return [cast(R, result) for result in results]

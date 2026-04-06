@@ -32,45 +32,56 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
 
     import time
     import litellm
+    import mlflow
     import pandas as pd
     from tqdm import tqdm
-    from dotenv import load_dotenv
-    import mlflow
 
-    from src.utils import format_product, extract_cost, get_model_string
-    from src.rubric import CRITERION_COLS, JUDGED_COLS, compute_final_score
+    from src.config import (
+        BASELINE_GENERATION_MODEL_ID,
+        DEFAULT_FINAL_PROVIDER,
+        IMPROVEMENT_GENERATION_MODEL_ID,
+        PROMPT_VERSION_V1,
+        PROMPT_VERSION_V2,
+        build_model_config,
+        prompt_path,
+    )
+    from src.paths import ASSIGNMENT_XLSX_PATH, PRODUCTS_CSV_PATH
+    from src.runtime import load_project_env, read_text, setup_mlflow
+    from src.utils import extract_cost, format_product
 
-    load_dotenv(os.path.join(os.getcwd(), "..", ".env"))
-    mlflow.set_tracking_uri(f"sqlite:///{os.path.join(os.getcwd(), '..', 'experiments.db')}")
-    mlflow.set_experiment("improvement_cycle")
-    mlflow.litellm.autolog()
+    load_project_env()
+    mlflow_db_path = setup_mlflow("improvement_cycle")
     return (
-        CRITERION_COLS,
-        JUDGED_COLS,
-        compute_final_score,
+        ASSIGNMENT_XLSX_PATH,
+        BASELINE_GENERATION_MODEL_ID,
+        DEFAULT_FINAL_PROVIDER,
+        IMPROVEMENT_GENERATION_MODEL_ID,
+        PRODUCTS_CSV_PATH,
+        PROMPT_VERSION_V1,
+        PROMPT_VERSION_V2,
+        build_model_config,
         extract_cost,
         format_product,
-        get_model_string,
         litellm,
-        load_dotenv,
         mlflow,
-        os,
+        mlflow_db_path,
         pd,
-        sys,
+        prompt_path,
+        read_text,
         time,
         tqdm,
     )
 
 
 @app.cell
-def _(os, pd):
-    products = pd.read_csv(os.path.join(os.getcwd(), "..", "data", "products.csv"))
-    xlsx_path = os.path.join(os.getcwd(), "..", "assignment_01.xlsx")
+def _(ASSIGNMENT_XLSX_PATH, PRODUCTS_CSV_PATH, pd):
+    products = pd.read_csv(PRODUCTS_CSV_PATH)
+    xlsx_path = ASSIGNMENT_XLSX_PATH
     df_baseline = pd.read_excel(xlsx_path)
     return df_baseline, products, xlsx_path
 
@@ -92,15 +103,30 @@ def _(mo):
 
 
 @app.cell
-def _(extract_cost, format_product, get_model_string, litellm, mlflow, os, pd, products, time, tqdm):
-    PROMPT_V1 = open(os.path.join(os.getcwd(), "..", "prompts", "generation_v1.txt")).read()
-    MODEL_BIG  = get_model_string("nebius", "Qwen/Qwen3-30B-A3B-Instruct-2507")
+def _(
+    DEFAULT_FINAL_PROVIDER,
+    IMPROVEMENT_GENERATION_MODEL_ID,
+    PROMPT_VERSION_V1,
+    build_model_config,
+    extract_cost,
+    format_product,
+    litellm,
+    mlflow,
+    pd,
+    products,
+    prompt_path,
+    read_text,
+    time,
+    tqdm,
+    ):
+    PROMPT_V1 = read_text(prompt_path(PROMPT_VERSION_V1))
+    MODEL_BIG = build_model_config(DEFAULT_FINAL_PROVIDER, IMPROVEMENT_GENERATION_MODEL_ID).model
 
     results_exp1 = []
     with mlflow.start_run(run_name="exp1_qwen30b_prompt_v1"):
         mlflow.log_params({
-            "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "provider": "nebius",
+            "model": IMPROVEMENT_GENERATION_MODEL_ID,
+            "provider": DEFAULT_FINAL_PROVIDER,
             "prompt_version": "v1",
             "temperature": 0.3,
             "change": "Larger model — Qwen3-30B instead of Llama-8B",
@@ -113,7 +139,7 @@ def _(extract_cost, format_product, get_model_string, litellm, mlflow, os, pd, p
                 model=MODEL_BIG,
                 messages=[
                     {"role": "system", "content": PROMPT_V1},
-                    {"role": "user",   "content": format_product(row.to_dict())},
+                    {"role": "user", "content": format_product(row.to_dict())},
                 ],
                 temperature=0.3,
                 max_tokens=200,
@@ -133,7 +159,7 @@ def _(extract_cost, format_product, get_model_string, litellm, mlflow, os, pd, p
         df_exp1 = pd.DataFrame(results_exp1)
         mlflow.log_metrics({
             "mean_latency_ms": df_exp1["latency_ms"].mean(),
-            "total_cost_usd":  df_exp1["cost_usd"].sum(),
+            "total_cost_usd": df_exp1["cost_usd"].sum(),
         })
 
     df_exp1.head(3)
@@ -159,44 +185,30 @@ def _(mo):
 
 
 @app.cell
-def _(extract_cost, format_product, get_model_string, litellm, mlflow, os, pd, products, time, tqdm):
-    # Create generation_v2.txt if it doesn't exist yet
-    _v2_path = os.path.join(os.getcwd(), "..", "prompts", "generation_v2.txt")
-    if not os.path.exists(_v2_path):
-        _v2_content = open(os.path.join(os.getcwd(), "..", "prompts", "generation_v1.txt")).read()
-        _v2_content += """
-
-## Examples of ideal descriptions
-
-### Example 1
-Product: Yeti Rambler 20 oz Tumbler
-Attributes: features: double-wall vacuum insulated, MagSlider lid; dimensions: compact
-Material: kitchen-grade stainless steel
-Warranty: 5-year warranty
-
-Description:
-Keep your drinks at the perfect temperature with the Yeti Rambler 20 oz Tumbler. Built from kitchen-grade stainless steel with double-wall vacuum insulation, this compact tumbler maintains temperature for hours. The MagSlider lid keeps spills away while staying easy to clean. Backed by a 5-year warranty, the Rambler is a reliable companion for your daily routine.
-
-### Example 2
-Product: Logitech MX Master 3S
-Attributes: features: 8K DPI sensor, MagSpeed scroll, Bolt & Bluetooth; color options: multiple
-Material: plastic
-Warranty: 1-year limited warranty
-
-Description:
-Elevate your productivity with the Logitech MX Master 3S. Featuring an ultra-precise 8K DPI sensor and whisper-quiet MagSpeed electromagnetic scrolling, this mouse is engineered for professionals who demand accuracy and speed. Connect via Bolt or Bluetooth and choose from multiple color options to match your setup. Comes with a 1-year limited warranty.
-"""
-        open(_v2_path, "w").write(_v2_content)
-        print("Created generation_v2.txt")
-
-    PROMPT_V2 = open(_v2_path).read()
-    MODEL_SMALL = get_model_string("nebius", "meta-llama/Meta-Llama-3.1-8B-Instruct")
+def _(
+    BASELINE_GENERATION_MODEL_ID,
+    DEFAULT_FINAL_PROVIDER,
+    PROMPT_VERSION_V2,
+    build_model_config,
+    extract_cost,
+    format_product,
+    litellm,
+    mlflow,
+    pd,
+    products,
+    prompt_path,
+    read_text,
+    time,
+    tqdm,
+    ):
+    PROMPT_V2 = read_text(prompt_path(PROMPT_VERSION_V2))
+    MODEL_SMALL = build_model_config(DEFAULT_FINAL_PROVIDER, BASELINE_GENERATION_MODEL_ID).model
 
     results_exp2 = []
     with mlflow.start_run(run_name="exp2_llama8b_prompt_v2_2shot"):
         mlflow.log_params({
-            "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "provider": "nebius",
+            "model": BASELINE_GENERATION_MODEL_ID,
+            "provider": DEFAULT_FINAL_PROVIDER,
             "prompt_version": "v2",
             "temperature": 0.3,
             "change": "Added 2-shot examples to prompt",
@@ -209,7 +221,7 @@ Elevate your productivity with the Logitech MX Master 3S. Featuring an ultra-pre
                 model=MODEL_SMALL,
                 messages=[
                     {"role": "system", "content": PROMPT_V2},
-                    {"role": "user",   "content": format_product(row.to_dict())},
+                    {"role": "user", "content": format_product(row.to_dict())},
                 ],
                 temperature=0.3,
                 max_tokens=200,
@@ -229,7 +241,7 @@ Elevate your productivity with the Logitech MX Master 3S. Featuring an ultra-pre
         df_exp2 = pd.DataFrame(results_exp2)
         mlflow.log_metrics({
             "mean_latency_ms": df_exp2["latency_ms"].mean(),
-            "total_cost_usd":  df_exp2["cost_usd"].sum(),
+            "total_cost_usd": df_exp2["cost_usd"].sum(),
         })
 
     df_exp2.head(3)

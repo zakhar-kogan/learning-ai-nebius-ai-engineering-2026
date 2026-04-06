@@ -48,52 +48,53 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
 
     import json
     import litellm
-    import pandas as pd
-    from tqdm import tqdm
-    from tenacity import retry, stop_after_attempt, retry_if_exception_type
-    from pydantic import ValidationError
-    from dotenv import load_dotenv
     import mlflow
+    import pandas as pd
+    from pydantic import ValidationError
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt
+    from tqdm import tqdm
 
-    from src.schemas import JudgeOutput, CriterionJudgment
-    from src.rubric import compute_final_score, CRITERION_COLS
-    from src.utils import format_judge_input, get_model_string
+    from src.config import PROMPT_JUDGE_ALL, get_judge_config, prompt_path
+    from src.paths import ASSIGNMENT_XLSX_PATH
+    from src.runtime import load_project_env, read_text, setup_mlflow
+    from src.schemas import JudgeOutput
+    from src.rubric import compute_final_score
+    from src.utils import format_judge_input
 
-    load_dotenv(os.path.join(os.getcwd(), "..", ".env"))
-    mlflow.set_tracking_uri(f"sqlite:///{os.path.join(os.getcwd(), '..', 'experiments.db')}")
-    mlflow.set_experiment("judge_runs")
-    mlflow.litellm.autolog()
+    load_project_env()
+    mlflow_db_path = setup_mlflow("judge_runs")
     return (
-        CriterionJudgment,
-        CRITERION_COLS,
+        ASSIGNMENT_XLSX_PATH,
+        PROMPT_JUDGE_ALL,
         JudgeOutput,
         ValidationError,
         compute_final_score,
         format_judge_input,
-        get_model_string,
+        get_judge_config,
         json,
         litellm,
-        load_dotenv,
         mlflow,
-        os,
+        mlflow_db_path,
         pd,
+        prompt_path,
+        read_text,
         retry,
         retry_if_exception_type,
         stop_after_attempt,
-        sys,
         tqdm,
     )
 
 
 @app.cell
-def _(get_model_string, os):
-    JUDGE_MODEL = get_model_string("nebius", "google/gemma-2-9b-it")
-    JUDGE_PROMPT = open(os.path.join(os.getcwd(), "..", "prompts", "judge_all.txt")).read()
+def _(PROMPT_JUDGE_ALL, get_judge_config, prompt_path, read_text):
+    judge_config = get_judge_config()
+    JUDGE_MODEL = judge_config.model
+    JUDGE_PROMPT = read_text(prompt_path(PROMPT_JUDGE_ALL))
     print(f"Judge model: {JUDGE_MODEL}")
     print("\n--- Judge Prompt ---")
     print(JUDGE_PROMPT)
@@ -164,8 +165,8 @@ def _(mo):
 
 
 @app.cell
-def _(os, pd, run_judge, tqdm):
-    df_main = pd.read_excel(os.path.join(os.getcwd(), "..", "assignment_01.xlsx"))
+def _(ASSIGNMENT_XLSX_PATH, pd, run_judge, tqdm):
+    df_main = pd.read_excel(ASSIGNMENT_XLSX_PATH)
     sanity_sample = df_main.head(5)
 
     sanity_results = []
@@ -175,13 +176,20 @@ def _(os, pd, run_judge, tqdm):
             ratings = result.to_ratings()
             sanity_results.append({
                 "product_name": row["product_name"],
-                "description":  row["generated_description"],
-                **{f"{k}_verdict":     v               for k, v in ratings.items()},
+                "description": row["generated_description"],
+                "judge_status": "ok",
+                "judge_error": "",
+                **{f"{k}_verdict": v for k, v in ratings.items()},
                 **{f"{k}_explanation": getattr(result, k).explanation for k in ratings},
             })
         except Exception as e:
             print(f"Failed on {row['product_name']}: {e}")
-            sanity_results.append({"product_name": row["product_name"], "error": str(e)})
+            sanity_results.append({
+                "product_name": row["product_name"],
+                "description": row["generated_description"],
+                "judge_status": "error",
+                "judge_error": str(e),
+            })
 
     pd.DataFrame(sanity_results)
     return df_main, sanity_results, sanity_sample
@@ -192,8 +200,8 @@ def _(mo, sanity_results):
     # Display each sanity result with explanations
     _md = "## Sanity Check Results\n\n"
     for _r in sanity_results:
-        if "error" in _r:
-            _md += f"**{_r['product_name']}**: ERROR — {_r['error']}\n\n"
+        if _r.get("judge_status") != "ok":
+            _md += f"**{_r['product_name']}**: ERROR — {_r['judge_error']}\n\n"
         else:
             _md += f"### {_r['product_name']}\n"
             for _c in ["fluency", "grammar", "tone", "length", "grounding"]:
@@ -209,14 +217,15 @@ def _(mo):
         r"""
         *(After reviewing sanity results, adjust `prompts/judge_all.txt` if needed, then proceed.)*
 
-        ## Full Run — All 51 Products
+        ## Full Run — All Products
         """
     )
     return
 
 
 @app.cell
-def _(CRITERION_COLS, compute_final_score, df_main, mlflow, os, pd, run_judge, tqdm):
+def _(ASSIGNMENT_XLSX_PATH, compute_final_score, df_main, mlflow, pd, run_judge, tqdm):
+    criteria = ["fluency", "grammar", "tone", "length", "grounding"]
     judge_rows = []
     with mlflow.start_run(run_name="judge_all_criteria_gemma9b"):
         mlflow.log_params({
@@ -225,43 +234,55 @@ def _(CRITERION_COLS, compute_final_score, df_main, mlflow, os, pd, run_judge, t
             "temperature": 0.0,
         })
 
-        for _, row in tqdm(df_main.iterrows(), total=len(df_main), desc="Judge (all)"):
+        for row_index, row in tqdm(df_main.iterrows(), total=len(df_main), desc="Judge (all)"):
             try:
                 result = run_judge(row.to_dict(), str(row["generated_description"]))
                 ratings = result.to_ratings()
-                # Add latency/cost from original run for final_score computation
-                all_ratings = {**ratings,
-                               "latency": str(row.get("latency", "")),
-                               "cost":    str(row.get("cost", ""))}
+                all_ratings = {
+                    **ratings,
+                    "latency": str(row.get("latency", "")).strip().lower(),
+                    "cost": str(row.get("cost", "")).strip().lower(),
+                }
                 final = compute_final_score(all_ratings)
                 judge_rows.append({
-                    **ratings,
+                    **{f"judge_{key}": value for key, value in ratings.items()},
+                    **{f"judge_{key}_explanation": getattr(result, key).explanation for key in ratings},
                     "judge_final_score": final,
-                    **{f"{k}_explanation": getattr(result, k).explanation for k in ratings},
+                    "judge_status": "ok",
+                    "judge_error": "",
                 })
             except Exception as e:
-                judge_rows.append({c: "error" for c in ["fluency","grammar","tone","length","grounding"]})
-                judge_rows[-1]["judge_final_score"] = "error"
-                print(f"Error on row {_}: {e}")
+                print(f"Error on row {row_index}: {e}")
+                judge_rows.append({
+                    **{f"judge_{criterion}": "" for criterion in criteria},
+                    **{f"judge_{criterion}_explanation": "" for criterion in criteria},
+                    "judge_final_score": "",
+                    "judge_status": "error",
+                    "judge_error": str(e),
+                })
 
         df_judge = pd.DataFrame(judge_rows)
+        successful_rows = df_judge["judge_status"] == "ok"
+        pass_rate = (
+            (df_judge.loc[successful_rows, "judge_final_score"] == "pass").mean()
+            if successful_rows.any()
+            else 0.0
+        )
+        error_rate = (df_judge["judge_status"] == "error").mean()
         mlflow.log_metrics({
-            "pass_rate":   (df_judge["judge_final_score"] == "pass").mean(),
-            "error_rate":  (df_judge["judge_final_score"] == "error").mean(),
+            "pass_rate": pass_rate,
+            "error_rate": error_rate,
         })
 
-    # Merge back
-    for _col in ["fluency","grammar","tone","length","grounding","judge_final_score"]:
-        df_main[f"judge_{_col}"] = df_judge[_col].values if _col in df_judge else df_judge[f"judge_{_col}"].values
+    for _col in df_judge.columns:
+        df_main[_col] = df_judge[_col].values
 
-    for _col in ["fluency","grammar","tone","length","grounding"]:
-        df_main[f"judge_{_col}"] = df_judge[_col].values
-    df_main["judge_final_score"] = df_judge["judge_final_score"].values
-
-    xlsx_out = os.path.join(os.getcwd(), "..", "assignment_01.xlsx")
-    df_main.to_excel(xlsx_out, index=False)
-    print(f"Saved. Judge pass rate: {(df_judge['judge_final_score'] == 'pass').mean():.0%}")
-    return df_judge, judge_rows, xlsx_out
+    df_main.to_excel(ASSIGNMENT_XLSX_PATH, index=False)
+    print(
+        f"Saved. Judge pass rate on successful rows: {pass_rate:.0%} | "
+        f"Errors: {(df_judge['judge_status'] == 'error').sum()}"
+    )
+    return df_judge, judge_rows, ASSIGNMENT_XLSX_PATH
 
 
 if __name__ == "__main__":

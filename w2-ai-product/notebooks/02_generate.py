@@ -17,7 +17,7 @@ def _(mo):
         # Task 2 — Generate Product Descriptions
 
         Using the rubric defined in Task 1, we generate a persuasive 50–90 word product
-        description for all 51 products using **Meta-Llama-3.1-8B-Instruct** on Nebius.
+        description for every product in the dataset using **Meta-Llama-3.1-8B-Instruct** on Nebius.
 
         ## Setup
         """
@@ -27,40 +27,49 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
 
     import time
     import litellm
+    import mlflow
     import pandas as pd
     from tqdm import tqdm
-    from dotenv import load_dotenv
-    import mlflow
 
-    from src.utils import format_product, extract_cost, get_model_string
+    from src.config import (
+        DEFAULT_DEV_PROVIDER,
+        PROMPT_VERSION_V1,
+        get_generation_config,
+        prompt_path,
+    )
+    from src.paths import ASSIGNMENT_XLSX_PATH, PRODUCTS_CSV_PATH
+    from src.runtime import load_project_env, read_text, setup_mlflow
+    from src.utils import extract_cost, format_product
 
-    load_dotenv(os.path.join(os.getcwd(), "..", ".env"))
+    load_project_env()
+    mlflow_db_path = setup_mlflow("product_descriptions")
     return (
+        ASSIGNMENT_XLSX_PATH,
+        DEFAULT_DEV_PROVIDER,
+        PRODUCTS_CSV_PATH,
+        PROMPT_VERSION_V1,
         extract_cost,
         format_product,
-        get_model_string,
+        get_generation_config,
         litellm,
-        load_dotenv,
         mlflow,
-        os,
+        mlflow_db_path,
         pd,
-        sys,
+        prompt_path,
+        read_text,
         time,
         tqdm,
     )
 
 
 @app.cell
-def _(mlflow, os):
-    # MLflow setup — autolog captures all litellm calls automatically
-    mlflow.set_tracking_uri(f"sqlite:///{os.path.join(os.getcwd(), '..', 'experiments.db')}")
-    mlflow.set_experiment("product_descriptions")
-    mlflow.litellm.autolog()
+def _(mlflow_db_path):
+    print(f"MLflow tracking DB: {mlflow_db_path}")
     return
 
 
@@ -79,11 +88,13 @@ def _(mo):
 
 
 @app.cell
-def _(get_model_string):
-    PROVIDER = "nebius"   # "nvidia_nim" for dev
-    MODEL_ID  = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    MODEL     = get_model_string(PROVIDER, MODEL_ID)
+def _(DEFAULT_DEV_PROVIDER, get_generation_config):
+    generation_config = get_generation_config()
+    MODEL = generation_config.model
+    MODEL_ID = generation_config.model_id
+    PROVIDER = generation_config.provider
     print(f"Using model: {MODEL}")
+    print(f"Set GENERATION_PROVIDER={DEFAULT_DEV_PROVIDER} for free dev/testing (40 RPM limit).")
     return MODEL, MODEL_ID, PROVIDER
 
 
@@ -104,8 +115,8 @@ def _(mo):
 
 
 @app.cell
-def _(os):
-    SYSTEM_PROMPT = open(os.path.join(os.getcwd(), "..", "prompts", "generation_v1.txt")).read()
+def _(PROMPT_VERSION_V1, prompt_path, read_text):
+    SYSTEM_PROMPT = read_text(prompt_path(PROMPT_VERSION_V1))
     print(SYSTEM_PROMPT)
     return (SYSTEM_PROMPT,)
 
@@ -151,13 +162,13 @@ def _(MODEL, SYSTEM_PROMPT, extract_cost, format_product, litellm, time):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## Run Generation on All 51 Products""")
+    mo.md(r"""## Run Generation on All Products""")
     return
 
 
 @app.cell
-def _(generate_description, mlflow, os, pd, tqdm):
-    products = pd.read_csv(os.path.join(os.getcwd(), "..", "data", "products.csv"))
+def _(PRODUCTS_CSV_PATH, generate_description, mlflow, pd, tqdm):
+    products = pd.read_csv(PRODUCTS_CSV_PATH)
 
     results = []
     with mlflow.start_run(run_name="generation_v1_llama8b"):
@@ -175,14 +186,16 @@ def _(generate_description, mlflow, os, pd, tqdm):
 
         results_df = pd.DataFrame(results)
         mlflow.log_metrics({
-            "mean_latency_ms":  results_df["latency_ms"].mean(),
-            "total_cost_usd":   results_df["cost_usd"].sum(),
-            "mean_input_tokens":  results_df["input_tokens"].mean(),
+            "mean_latency_ms": results_df["latency_ms"].mean(),
+            "total_cost_usd": results_df["cost_usd"].sum(),
+            "mean_input_tokens": results_df["input_tokens"].mean(),
             "mean_output_tokens": results_df["output_tokens"].mean(),
         })
 
-    print(f"Done. Mean latency: {results_df['latency_ms'].mean():.0f} ms | "
-          f"Total cost: ${results_df['cost_usd'].sum():.6f}")
+    print(
+        f"Done. Mean latency: {results_df['latency_ms'].mean():.0f} ms | "
+        f"Total cost: ${results_df['cost_usd'].sum():.6f}"
+    )
     return products, results, results_df
 
 
@@ -193,14 +206,14 @@ def _(mo):
 
 
 @app.cell
-def _(os, pd, products, results_df):
+def _(ASSIGNMENT_XLSX_PATH, pd, products, results_df):
     df = pd.concat([products.reset_index(drop=True), results_df.reset_index(drop=True)], axis=1)
 
     # Blank columns for all 7 criteria + final_score (filled in Task 3 by hand)
     for _col in ["fluency", "grammar", "tone", "length", "grounding", "latency", "cost", "final_score"]:
         df[_col] = ""
 
-    out_path = os.path.join(os.getcwd(), "..", "assignment_01.xlsx")
+    out_path = ASSIGNMENT_XLSX_PATH
     df.to_excel(out_path, index=False)
     print(f"Saved {len(df)} rows to {out_path}")
     df.head()

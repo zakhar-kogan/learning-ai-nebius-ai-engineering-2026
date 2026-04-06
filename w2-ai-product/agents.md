@@ -11,7 +11,7 @@ This is Assignment 1 for the Nebius AI Engineering course. The goal is to build 
 - **Notebooks**: `marimo` (Reactive notebooks, stored as pure Python files in `notebooks/`)
 - **API Client**: `litellm` (handles routing for Nebius and NVIDIA NIM)
 - **Structured Output**: `pydantic` (for Judge schemas)
-- **Experiment Tracking**: `mlflow` (using local SQLite `experiments.db` + `mlflow.litellm.autolog()`)
+- **Experiment Tracking**: `mlflow` (using local SQLite `outputs/experiments.db` + `mlflow.litellm.autolog()`)
 - **Data Handling**: `pandas`, `openpyxl`
 
 ## Directory Structure
@@ -30,4 +30,4 @@ This is Assignment 1 for the Nebius AI Engineering course. The goal is to build 
 ## How to run
 1. Set `NEBIUS_API_KEY` (and optionally `NVIDIA_API_KEY`) in `.env` inside `w2-ai-product/`.
 2. Run notebooks sequentially: `marimo edit notebooks/01_rubric.py`
-3. Check traces: `mlflow ui --backend-store-uri sqlite:///experiments.db`
+3. Check traces: `mlflow ui --backend-store-uri sqlite:///outputs/experiments.db`

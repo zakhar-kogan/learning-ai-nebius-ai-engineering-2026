@@ -1,0 +1,12 @@
+{
+  "include": [
+    "assignment_cli.py",
+    "tests",
+    "w2-ai-product"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "w2-ai-product"
+  ]
+}

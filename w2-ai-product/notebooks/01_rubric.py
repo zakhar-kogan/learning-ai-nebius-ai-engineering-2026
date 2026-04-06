@@ -141,10 +141,11 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
-    from src.rubric import RUBRIC, JUDGED_CRITERIA, compute_final_score, render_rubric_for_prompt
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
+
     import pandas as pd
+    from src.rubric import RUBRIC, render_rubric_for_prompt
 
     return RUBRIC, pd, render_rubric_for_prompt
 

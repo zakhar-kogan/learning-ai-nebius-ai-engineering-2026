@@ -91,6 +91,22 @@ PASS_MIN_GOOD = 4                     # at least 4 "good" out of 7
 PASS_MAX_BAD  = 0                     # zero "bad" allowed
 
 
+def rate_latency_ms(latency_ms: float) -> str:
+    if latency_ms < 2000:
+        return Rating.GOOD.value
+    if latency_ms < 5000:
+        return Rating.OK.value
+    return Rating.BAD.value
+
+
+def rate_cost_usd(cost_usd: float) -> str:
+    if cost_usd < 0.0005:
+        return Rating.GOOD.value
+    if cost_usd < 0.002:
+        return Rating.OK.value
+    return Rating.BAD.value
+
+
 def compute_final_score(ratings: dict[str, str]) -> str:
     """
     Apply cumulative pass bar + go/no-go rules.

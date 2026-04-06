@@ -17,8 +17,8 @@ def _(mo):
         # Task 3 — Manual (Human) Evaluation
 
         ## Workflow
-        1. This notebook adds programmatic ratings (latency, cost) to the xlsx
-        2. You manually open `assignment_01.xlsx` and rate 10–15 products for the 5 judged criteria
+        1. This notebook adds programmatic ratings (latency, cost) to the workbook
+        2. You manually open `outputs/assignment_01.xlsx` and rate 10–15 products for the 5 judged criteria
         3. Re-run this notebook to read back your scores and compute final_score + baseline analysis
         """
     )
@@ -27,29 +27,34 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
+
     import pandas as pd
+    from src.paths import ASSIGNMENT_XLSX_PATH
     from src.rubric import (
-        RUBRIC, JUDGED_COLS, CRITERION_COLS,
-        compute_final_score, GO_NO_GO, PASS_MIN_GOOD
-    )
-    return (
         CRITERION_COLS,
-        GO_NO_GO,
         JUDGED_COLS,
-        PASS_MIN_GOOD,
         RUBRIC,
         compute_final_score,
-        os,
+        rate_cost_usd,
+        rate_latency_ms,
+    )
+    return (
+        ASSIGNMENT_XLSX_PATH,
+        CRITERION_COLS,
+        JUDGED_COLS,
+        RUBRIC,
+        compute_final_score,
         pd,
-        sys,
+        rate_cost_usd,
+        rate_latency_ms,
     )
 
 
 @app.cell
-def _(os, pd):
-    xlsx_path = os.path.join(os.getcwd(), "..", "assignment_01.xlsx")
+def _(ASSIGNMENT_XLSX_PATH, pd):
+    xlsx_path = ASSIGNMENT_XLSX_PATH
     df = pd.read_excel(xlsx_path)
     print(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
     return df, xlsx_path
@@ -68,21 +73,9 @@ def _(mo):
 
 
 @app.cell
-def _(df, xlsx_path):
-    # Latency rating
-    def _rate_latency(ms):
-        if ms < 2000:   return "good"
-        if ms < 5000:   return "ok"
-        return "bad"
-
-    # Cost rating (per-call cost in USD)
-    def _rate_cost(c):
-        if c < 0.0005:  return "good"
-        if c < 0.002:   return "ok"
-        return "bad"
-
-    df["latency"] = df["latency_ms"].apply(_rate_latency)
-    df["cost"]    = df["cost_usd"].apply(_rate_cost)
+def _(df, rate_cost_usd, rate_latency_ms, xlsx_path):
+    df["latency"] = df["latency_ms"].apply(rate_latency_ms)
+    df["cost"] = df["cost_usd"].apply(rate_cost_usd)
     df.to_excel(xlsx_path, index=False)
     print("Programmatic ratings written. Latency distribution:")
     print(df["latency"].value_counts().to_string())
@@ -97,7 +90,7 @@ def _(mo):
         r"""
         ## Step 2 — Manual Evaluation Instructions
 
-        Open `assignment_01.xlsx` now. Choose 10–15 rows and fill in:
+        Open `outputs/assignment_01.xlsx` now. Choose 10–15 rows and fill in:
 
         | Column | Valid values |
         |--------|-------------|

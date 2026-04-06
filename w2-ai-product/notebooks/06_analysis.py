@@ -18,61 +18,61 @@ def _(mo):
 
 @app.cell
 def _():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.getcwd(), ".."))
+    from _bootstrap import bootstrap_notebook
+    bootstrap_notebook()
 
     import json
     import litellm
-    import pandas as pd
-    import numpy as np
-    from tqdm import tqdm
-    from tenacity import retry, stop_after_attempt, retry_if_exception_type
-    from pydantic import ValidationError
-    from dotenv import load_dotenv
     import mlflow
+    import pandas as pd
+    from pydantic import ValidationError
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt
+    from tqdm import tqdm
 
+    from src.config import PROMPT_JUDGE_SINGLE, get_judge_config, prompt_path
+    from src.paths import ASSIGNMENT_XLSX_PATH
+    from src.runtime import load_project_env, read_text, setup_mlflow
     from src.schemas import CriterionJudgment
-    from src.rubric import RUBRIC, JUDGED_CRITERIA, JUDGED_COLS, compute_final_score
-    from src.utils import format_judge_input, get_model_string
+    from src.rubric import JUDGED_COLS, JUDGED_CRITERIA, compute_final_score
+    from src.utils import format_judge_input
 
-    load_dotenv(os.path.join(os.getcwd(), "..", ".env"))
-    mlflow.set_tracking_uri(f"sqlite:///{os.path.join(os.getcwd(), '..', 'experiments.db')}")
-    mlflow.set_experiment("judge_runs")
-    mlflow.litellm.autolog()
+    load_project_env()
+    mlflow_db_path = setup_mlflow("judge_runs")
     return (
+        ASSIGNMENT_XLSX_PATH,
         CriterionJudgment,
         JUDGED_COLS,
         JUDGED_CRITERIA,
-        RUBRIC,
+        PROMPT_JUDGE_SINGLE,
         ValidationError,
         compute_final_score,
         format_judge_input,
-        get_model_string,
+        get_judge_config,
         json,
         litellm,
-        load_dotenv,
         mlflow,
-        np,
-        os,
+        mlflow_db_path,
         pd,
+        prompt_path,
+        read_text,
         retry,
         retry_if_exception_type,
         stop_after_attempt,
-        sys,
         tqdm,
     )
 
 
 @app.cell
-def _(get_model_string, os):
-    JUDGE_MODEL = get_model_string("nebius", "google/gemma-2-9b-it")
-    SINGLE_PROMPT_TEMPLATE = open(os.path.join(os.getcwd(), "..", "prompts", "judge_single.txt")).read()
+def _(PROMPT_JUDGE_SINGLE, get_judge_config, prompt_path, read_text):
+    judge_config = get_judge_config()
+    JUDGE_MODEL = judge_config.model
+    SINGLE_PROMPT_TEMPLATE = read_text(prompt_path(PROMPT_JUDGE_SINGLE))
     return JUDGE_MODEL, SINGLE_PROMPT_TEMPLATE
 
 
 @app.cell
-def _(os, pd):
-    df = pd.read_excel(os.path.join(os.getcwd(), "..", "assignment_01.xlsx"))
+def _(ASSIGNMENT_XLSX_PATH, pd):
+    df = pd.read_excel(ASSIGNMENT_XLSX_PATH)
     print(f"Loaded {len(df)} rows")
     df.head(2)
     return (df,)
@@ -105,7 +105,11 @@ def _(JUDGED_COLS, df, mo, pd):
             _judge_col = f"judge_{_col}"
             if _judge_col not in _scored.columns:
                 continue
-            _both = _scored[_scored[_judge_col].notna() & (_scored[_judge_col] != "")]
+            _both = _scored[
+                (_scored.get("judge_status", "") == "ok")
+                & _scored[_judge_col].notna()
+                & (_scored[_judge_col] != "")
+            ]
             if len(_both) == 0:
                 continue
             _agree = (_both[_human_col].str.strip() == _both[_judge_col].str.strip()).mean()
@@ -224,7 +228,7 @@ def _(
 
 
 @app.cell
-def _(JUDGED_CRITERIA, compute_final_score, df, mlflow, os, pd, single_judges, tqdm):
+def _(ASSIGNMENT_XLSX_PATH, JUDGED_CRITERIA, compute_final_score, df, mlflow, pd, single_judges, tqdm):
     single_rows = []
     with mlflow.start_run(run_name="judge_per_criterion_gemma9b"):
         mlflow.log_params({
@@ -236,21 +240,34 @@ def _(JUDGED_CRITERIA, compute_final_score, df, mlflow, os, pd, single_judges, t
 
         for _, row in tqdm(df.iterrows(), total=len(df), desc="Per-criterion judge"):
             row_result = {}
+            row_errors = []
             for crit in JUDGED_CRITERIA:
                 cname = crit.name.lower()
                 try:
                     j = single_judges[cname](row.to_dict(), str(row["generated_description"]))
                     row_result[f"single_{cname}"] = j.verdict.value
                     row_result[f"single_{cname}_explanation"] = j.explanation
+                    row_result[f"single_{cname}_status"] = "ok"
+                    row_result[f"single_{cname}_error"] = ""
                 except Exception as e:
-                    row_result[f"single_{cname}"] = "error"
-                    row_result[f"single_{cname}_explanation"] = str(e)
+                    row_result[f"single_{cname}"] = ""
+                    row_result[f"single_{cname}_explanation"] = ""
+                    row_result[f"single_{cname}_status"] = "error"
+                    row_result[f"single_{cname}_error"] = str(e)
+                    row_errors.append(f"{cname}: {e}")
+
+            row_result["single_judge_status"] = (
+                "ok"
+                if not row_errors
+                else ("partial_error" if len(row_errors) < len(JUDGED_CRITERIA) else "error")
+            )
+            row_result["single_judge_error"] = "; ".join(row_errors)
             single_rows.append(row_result)
 
         df_single = pd.DataFrame(single_rows)
 
         # Compute final score from per-criterion results using the programmatic
-        # latency/cost ratings already written into assignment_01.xlsx.
+        # latency/cost ratings already written into outputs/assignment_01.xlsx.
         def _single_final(row_s):
             ratings = {c.name.lower(): row_s.get(f"single_{c.name.lower()}", "") for c in JUDGED_CRITERIA}
             ratings["latency"] = (
@@ -266,22 +283,32 @@ def _(JUDGED_CRITERIA, compute_final_score, df, mlflow, os, pd, single_judges, t
             return compute_final_score(ratings)
 
         df_single["single_final_score"] = df_single.apply(_single_final, axis=1)
+        successful_rows = df_single["single_judge_status"] == "ok"
+        pass_rate = (
+            (df_single.loc[successful_rows, "single_final_score"] == "pass").mean()
+            if successful_rows.any()
+            else 0.0
+        )
+        error_rate = (df_single["single_judge_status"] != "ok").mean()
         mlflow.log_metrics({
-            "pass_rate": (df_single["single_final_score"] == "pass").mean(),
+            "pass_rate": pass_rate,
+            "error_rate": error_rate,
         })
 
     # Merge back into main df
     for _c in df_single.columns:
         df[_c] = df_single[_c].values
 
-    xlsx_out = os.path.join(os.getcwd(), "..", "assignment_01.xlsx")
-    df.to_excel(xlsx_out, index=False)
-    print(f"Per-criterion done. Pass rate: {(df_single['single_final_score'] == 'pass').mean():.0%}")
-    return df_single, single_rows, xlsx_out
+    df.to_excel(ASSIGNMENT_XLSX_PATH, index=False)
+    print(
+        f"Per-criterion done. Pass rate on successful rows: {pass_rate:.0%} | "
+        f"Rows with errors: {(df_single['single_judge_status'] != 'ok').sum()}"
+    )
+    return df_single, single_rows, ASSIGNMENT_XLSX_PATH
 
 
 @app.cell
-def _(JUDGED_COLS, df, df_single, mo, pd):
+def _(JUDGED_COLS, df, mo, pd):
     # Agreement: human vs per-criterion judge
     _scored_mask = df["fluency"].notna() & (df["fluency"].str.strip() != "")
     _scored = df[_scored_mask].copy()
@@ -290,21 +317,26 @@ def _(JUDGED_COLS, df, df_single, mo, pd):
         _rows = []
         for _col in JUDGED_COLS:
             _human_col = _col
-            _judge_all_col  = f"judge_{_col}"
+            _judge_all_col = f"judge_{_col}"
             _judge_sing_col = f"single_{_col}"
+            _single_status_col = f"single_{_col}_status"
             _both = _scored[
-                _scored[_judge_all_col].notna() &
-                _scored[_judge_sing_col].notna()
+                (_scored.get("judge_status", "") == "ok")
+                & (_scored.get(_single_status_col, "") == "ok")
+                & _scored[_judge_all_col].notna()
+                & _scored[_judge_sing_col].notna()
+                & (_scored[_judge_all_col] != "")
+                & (_scored[_judge_sing_col] != "")
             ]
             if len(_both) == 0:
                 continue
-            _agree_all  = (_both[_human_col].str.strip() == _both[_judge_all_col].str.strip()).mean()
+            _agree_all = (_both[_human_col].str.strip() == _both[_judge_all_col].str.strip()).mean()
             _agree_sing = (_both[_human_col].str.strip() == _both[_judge_sing_col].str.strip()).mean()
             _rows.append({
-                "Criterion":           _col.capitalize(),
-                "All-at-Once %":       f"{_agree_all:.0%}",
-                "Per-Criterion %":     f"{_agree_sing:.0%}",
-                "Delta":               f"{(_agree_sing - _agree_all):+.0%}",
+                "Criterion": _col.capitalize(),
+                "All-at-Once %": f"{_agree_all:.0%}",
+                "Per-Criterion %": f"{_agree_sing:.0%}",
+                "Delta": f"{(_agree_sing - _agree_all):+.0%}",
             })
         mo.ui.table(pd.DataFrame(_rows), label="Human agreement: All-at-Once vs Per-Criterion")
     else:
