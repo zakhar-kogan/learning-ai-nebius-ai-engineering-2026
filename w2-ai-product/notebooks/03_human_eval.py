@@ -1,33 +1,33 @@
 import marimo
 
-__generated_with = "0.22.0"
+__generated_with = "0.22.5"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        # Task 3 — Manual (Human) Evaluation
+    mo.md(r"""
+    # Task 3 — Manual (Human) Evaluation
 
-        ## Workflow
-        1. This notebook adds programmatic ratings (latency, cost) to the workbook
-        2. You manually open `outputs/assignment_01.xlsx` and rate 10–15 products for the 5 judged criteria
-        3. Re-run this notebook to read back your scores and compute final_score + baseline analysis
-        """
-    )
+    ## Workflow
+    1. This notebook adds programmatic ratings (latency, cost) to the workbook
+    2. You manually open `outputs/assignment_01.xlsx` and rate 10–15 products for the 5 judged criteria
+    3. Re-run this notebook to read back your scores and compute final_score + baseline analysis
+    """)
     return
 
 
 @app.cell
 def _():
     from _bootstrap import bootstrap_notebook
+
     bootstrap_notebook()
 
     import pandas as pd
@@ -35,16 +35,15 @@ def _():
     from src.rubric import (
         CRITERION_COLS,
         JUDGED_COLS,
-        RUBRIC,
         compute_final_score,
         rate_cost_usd,
         rate_latency_ms,
     )
+
     return (
         ASSIGNMENT_XLSX_PATH,
         CRITERION_COLS,
         JUDGED_COLS,
-        RUBRIC,
         compute_final_score,
         pd,
         rate_cost_usd,
@@ -62,13 +61,11 @@ def _(ASSIGNMENT_XLSX_PATH, pd):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## Step 1 — Programmatic Ratings
+    mo.md(r"""
+    ## Step 1 — Programmatic Ratings
 
-        Latency and Cost are computed from API response metadata, not judged.
-        """
-    )
+    Latency and Cost are computed from API response metadata, not judged.
+    """)
     return
 
 
@@ -86,32 +83,30 @@ def _(df, rate_cost_usd, rate_latency_ms, xlsx_path):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## Step 2 — Manual Evaluation Instructions
+    mo.md(r"""
+    ## Step 2 — Manual Evaluation Instructions
 
-        Open `outputs/assignment_01.xlsx` now. Choose 10–15 rows and fill in:
+    Open `outputs/assignment_01.xlsx` now. Choose 10–15 rows and fill in:
 
-        | Column | Valid values |
-        |--------|-------------|
-        | `fluency` | good / ok / bad |
-        | `grammar` | good / ok / bad |
-        | `tone` | good / ok / bad |
-        | `length` | good / ok / bad |
-        | `grounding` | good / ok / bad |
+    | Column | Valid values |
+    |--------|-------------|
+    | `fluency` | good / ok / bad |
+    | `grammar` | good / ok / bad |
+    | `tone` | good / ok / bad |
+    | `length` | good / ok / bad |
+    | `grounding` | good / ok / bad |
 
-        Leave other rows blank. Save and re-run this cell.
+    Leave other rows blank. Save and re-run this cell.
 
-        **Grounding tip**: compare every claim in the description against the
-        `Product_attribute_list`, `material`, and `warranty` columns. Any claim
-        not traceable to those fields is a hallucination.
-        """
-    )
+    **Grounding tip**: compare every claim in the description against the
+    `Product_attribute_list`, `material`, and `warranty` columns. Any claim
+    not traceable to those fields is a hallucination.
+    """)
     return
 
 
 @app.cell
-def _(CRITERION_COLS, compute_final_score, os, pd, xlsx_path):
+def _(CRITERION_COLS, compute_final_score, pd, xlsx_path):
     # Re-read after manual scoring
     df2 = pd.read_excel(xlsx_path)
 
@@ -125,57 +120,66 @@ def _(CRITERION_COLS, compute_final_score, os, pd, xlsx_path):
 
     scored = df2[df2["fluency"].notna() & (df2["fluency"] != "")]
     print(f"Manually scored rows: {len(scored)}")
-    print(f"Pass: {(scored['final_score'] == 'pass').sum()} | Fail: {(scored['final_score'] == 'fail').sum()}")
-    return df2, scored
+    print(
+        f"Pass: {(scored['final_score'] == 'pass').sum()} | Fail: {(scored['final_score'] == 'fail').sum()}"
+    )
+    return (scored,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""## Step 3 — Baseline Analysis""")
+    mo.md(r"""
+    ## Step 3 — Baseline Analysis
+    """)
     return
 
 
 @app.cell
 def _(JUDGED_COLS, mo, pd, scored):
     if len(scored) == 0:
-        mo.md("**No manual scores yet — fill in the xlsx first.**")
+        summary_output = mo.md("**No manual scores yet — fill in the xlsx first.**")
     else:
         _rows = []
         for _col in JUDGED_COLS:
             _vals = scored[_col].value_counts()
-            _rows.append({
-                "Criterion": _col.capitalize(),
-                "good": _vals.get("good", 0),
-                "ok":   _vals.get("ok",   0),
-                "bad":  _vals.get("bad",  0),
-                "good %": f"{100 * _vals.get('good', 0) / len(scored):.0f}%",
-            })
+            _rows.append(
+                {
+                    "Criterion": _col.capitalize(),
+                    "good": _vals.get("good", 0),
+                    "ok": _vals.get("ok", 0),
+                    "bad": _vals.get("bad", 0),
+                    "good %": f"{100 * _vals.get('good', 0) / len(scored):.0f}%",
+                }
+            )
         _summary = pd.DataFrame(_rows).sort_values("good %", ascending=False)
-        mo.ui.table(_summary, label="Criterion performance (best → worst)")
+        summary_output = mo.ui.table(
+            _summary,
+            label="Criterion performance (best → worst)",
+        )
+    summary_output
     return
 
 
 @app.cell
 def _(mo, scored):
+    scored_count = len(scored)
+    pass_count = int((scored["final_score"] == "pass").sum()) if scored_count else 0
+    pass_rate_label = f"{pass_count / scored_count:.0%}" if scored_count else "–"
     mo.md(
         f"""
         ## Step 4 — Baseline Analysis Write-Up
 
-        *(Fill this in after reviewing the table above.)*
-
         **Best-performing criteria:**
-        - *(e.g. Grammar — most descriptions had zero errors.)*
+        Length is strongest at 16/16 good. Grammar and tone follow at 15/16 good each, so the baseline already writes fluent, polished copy on most manually reviewed rows.
 
         **Worst-performing criteria:**
-        - *(e.g. Grounding — small model frequently added ungrounded claims; Length — outputs often ran long.)*
+        Grounding is the clear weak point: 0/16 rows earned a `good`, with 12 `ok` and 4 `bad`. The main failure mode is small but unsupported embellishment rather than broken grammar.
 
         **Improvement strategy for Task 4:**
-        - If Grounding is worst: add explicit "do not invent" instruction + few-shot examples showing correct grounding
-        - If Length is worst: add post-processing word-count enforcement
-        - If Tone is worst: try a larger model or rewrite tone instruction
+        Keep the strong style behavior, but add stricter anti-hallucination instructions and grounded examples so the model stays closer to the source data.
 
-        **Pass rate:** {len(scored[scored["final_score"] == "pass"]) if len(scored) > 0 else "–"} /
-        {len(scored)} manually evaluated
+        **Pass rate:** {pass_count if scored_count > 0 else "–"} /
+        {scored_count} manually evaluated ({pass_rate_label})
         """
     )
     return

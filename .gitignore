@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# macOS
+.DS_Store
+
 # C extensions
 *.so
 
@@ -209,11 +212,22 @@ __marimo__/
 
 # Assignment runtime artifacts
 w2-ai-product/outputs/*
+
+# Submission deliverables kept visible to git
 !w2-ai-product/outputs/.gitkeep
+!w2-ai-product/outputs/assignment_01.xlsx
+!w2-ai-product/outputs/task_04_experiments.xlsx
+!w2-ai-product/outputs/task_05_judge_sanity.csv
+!w2-ai-product/outputs/task_06_judged_experiments.csv
 !w2-ai-product/outputs/html/
 w2-ai-product/outputs/html/*
 !w2-ai-product/outputs/html/.gitkeep
+!w2-ai-product/outputs/html/task_*.html
+
+# Generated intermediate artifacts kept ignored
 !w2-ai-product/outputs/reports/
 w2-ai-product/outputs/reports/*
 !w2-ai-product/outputs/reports/.gitkeep
+w2-ai-product/outputs/ipynb/
 w2-ai-product/mlruns/
+w2-ai-product/notebooks/mlruns/

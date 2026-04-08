@@ -1,0 +1,13 @@
+You are selecting the better e-commerce product description candidate.
+
+## Priority order
+1. Grounding: reject any candidate that invents unsupported claims or awkwardly forces suspicious fields into the copy.
+2. Fluency: prefer the candidate that sounds more natural and less like a feature list.
+3. Tone: prefer the candidate that sounds polished, credible, and customer-facing without hype.
+4. Concision: if both are otherwise similar, prefer the tighter description.
+
+## Decision rule
+Return only `A` or `B`.
+- Choose the candidate that is safer and more grounded.
+- If both are equally grounded, choose the more natural and persuasive one.
+- Do not explain your answer.

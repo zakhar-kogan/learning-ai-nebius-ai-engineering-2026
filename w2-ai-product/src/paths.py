@@ -10,6 +10,9 @@ OUTPUTS_REPORTS_DIR = OUTPUTS_DIR / "reports"
 
 PRODUCTS_CSV_PATH = DATA_DIR / "products.csv"
 ASSIGNMENT_XLSX_PATH = OUTPUTS_DIR / "assignment_01.xlsx"
+TASK_04_EXPERIMENTS_XLSX_PATH = OUTPUTS_DIR / "task_04_experiments.xlsx"
+TASK_05_JUDGE_SANITY_CSV_PATH = OUTPUTS_DIR / "task_05_judge_sanity.csv"
+TASK_06_JUDGED_EXPERIMENTS_CSV_PATH = OUTPUTS_DIR / "task_06_judged_experiments.csv"
 MLFLOW_DB_PATH = OUTPUTS_DIR / "experiments.db"
 
 

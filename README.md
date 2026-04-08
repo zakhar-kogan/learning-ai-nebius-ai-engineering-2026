@@ -62,19 +62,43 @@ To actually launch it:
 uv run python assignment_cli.py open task-03 --execute
 ```
 
+Before rerunning Task 4, you can optionally add your own stronger examples directly in `w2-ai-product/notebooks/04_improve.py` by filling the inline `POSITIVE_EXAMPLES` dict.
+
+Keep it empty to disable extra positive examples. If populated, each key should be a product-info string and each value should be the grounded description you want the prompt to imitate.
+
+`04_improve.py` automatically appends those positive examples to the improvement prompts and logs whether they were enabled, how many were used, and which product names they covered.
+
+If you close and reopen the notebook after Task 4 has already produced the per-experiment CSVs, you do not need to rerun the experiments. Rebuild the workbook directly from persisted outputs:
+
+```bash
+uv run python assignment_cli.py rebuild-task4
+```
+
+
 ## Human checkpoints
 These steps are intentionally manual and should not be automated away:
 - After Task 3 writes `w2-ai-product/outputs/assignment_01.xlsx`, manually label 10–15 rows for `fluency`, `grammar`, `tone`, `length`, and `grounding`.
 - After Task 5 produces the 5-row sanity check, inspect the judge outputs before running the full judge pass.
 - After Task 6, replace placeholder notebook text with your real analysis.
 
-## Generated artifacts
-All generated files should live under `w2-ai-product/outputs/`.
+## Submission artifacts
+The final submission artifacts live under `w2-ai-product/outputs/`.
 
-Expected paths:
-- `w2-ai-product/outputs/assignment_01.xlsx`
-- `w2-ai-product/outputs/experiments.db`
-- `w2-ai-product/outputs/html/task_01.html` ... `task_06.html`
+Notebook exports:
+- `w2-ai-product/outputs/html/task_01.html`
+- `w2-ai-product/outputs/html/task_02.html`
+- `w2-ai-product/outputs/html/task_03.html`
+- `w2-ai-product/outputs/html/task_04.html`
+- `w2-ai-product/outputs/html/task_05.html`
+- `w2-ai-product/outputs/html/task_06.html`
+
+Spreadsheet / table deliverables:
+- `w2-ai-product/outputs/assignment_01.xlsx` — baseline generation workbook with Task 3 manual evaluation
+- `w2-ai-product/outputs/task_04_experiments.xlsx` — Task 4 experiment comparison workbook
+- `w2-ai-product/outputs/task_05_judge_sanity.csv` — Task 5 judge sanity-check outputs
+- `w2-ai-product/outputs/task_06_judged_experiments.csv` — Task 6 full judge results and analysis table
+
+Additional generated runtime artifacts may also appear under `w2-ai-product/outputs/`, but the files above are the intended submission set.
 
 ## Export HTML
 Preview the export commands:

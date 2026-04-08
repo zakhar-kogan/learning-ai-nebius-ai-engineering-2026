@@ -36,9 +36,11 @@ def _():
     import pandas as pd
     from tqdm import tqdm
 
+    from src.artifacts import load_excel_artifact
     from src.config import (
         DEFAULT_DEV_PROVIDER,
         PROMPT_VERSION_V1,
+        get_force_rerun,
         get_generation_config,
         prompt_path,
     )
@@ -53,10 +55,10 @@ def _():
         DEFAULT_DEV_PROVIDER,
         PRODUCTS_CSV_PATH,
         PROMPT_VERSION_V1,
-        extract_cost,
-        format_product,
+        get_force_rerun,
         get_generation_config,
         litellm,
+        load_excel_artifact,
         mlflow,
         mlflow_db_path,
         pd,
@@ -88,14 +90,17 @@ def _(mo):
 
 
 @app.cell
-def _(DEFAULT_DEV_PROVIDER, get_generation_config):
+def _(DEFAULT_DEV_PROVIDER, get_force_rerun, get_generation_config):
+    FORCE_RERUN = get_force_rerun()
     generation_config = get_generation_config()
     MODEL = generation_config.model
     MODEL_ID = generation_config.model_id
     PROVIDER = generation_config.provider
     print(f"Using model: {MODEL}")
     print(f"Set GENERATION_PROVIDER={DEFAULT_DEV_PROVIDER} for free dev/testing (40 RPM limit).")
-    return MODEL, MODEL_ID, PROVIDER
+    if FORCE_RERUN:
+        print("FORCE_RERUN=1 — ignoring existing Task 2 artifact.")
+    return FORCE_RERUN, MODEL, MODEL_ID, PROVIDER
 
 
 @app.cell
@@ -167,57 +172,88 @@ def _(mo):
 
 
 @app.cell
-def _(PRODUCTS_CSV_PATH, generate_description, mlflow, pd, tqdm):
-    products = pd.read_csv(PRODUCTS_CSV_PATH)
+def _(
+    ASSIGNMENT_XLSX_PATH,
+    FORCE_RERUN,
+    PRODUCTS_CSV_PATH,
+    generate_description,
+    load_excel_artifact,
+    mlflow,
+    pd,
+    tqdm,
+ ):
+    required_columns = [
+        "product_name",
+        "generated_description",
+        "latency_ms",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "fluency",
+        "grammar",
+        "tone",
+        "length",
+        "grounding",
+        "latency",
+        "cost",
+        "final_score",
+    ]
+    existing_df = None
+    if not FORCE_RERUN:
+        existing_df = load_excel_artifact(
+            ASSIGNMENT_XLSX_PATH,
+            required_columns=required_columns,
+        )
 
-    results = []
-    with mlflow.start_run(run_name="generation_v1_llama8b"):
-        mlflow.log_params({
-            "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "provider": "nebius",
-            "prompt_version": "v1",
-            "temperature": 0.3,
-            "max_tokens": 200,
-        })
+    if existing_df is not None:
+        print(f"Source: loaded existing artifact {ASSIGNMENT_XLSX_PATH}")
+        df = existing_df.copy()
+    else:
+        print(f"Source: artifact missing or invalid, running live generation -> {ASSIGNMENT_XLSX_PATH}")
+        products = pd.read_csv(PRODUCTS_CSV_PATH)
+        results = []
+        with mlflow.start_run(run_name="generation_v1_llama8b"):
+            mlflow.log_params({
+                "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+                "provider": "nebius",
+                "prompt_version": "v1",
+                "temperature": 0.3,
+                "max_tokens": 200,
+            })
 
-        for _, row in tqdm(products.iterrows(), total=len(products), desc="Generating"):
-            result = generate_description(row.to_dict())
-            results.append(result)
+            for _, row in tqdm(products.iterrows(), total=len(products), desc="Generating"):
+                result = generate_description(row.to_dict())
+                results.append(result)
 
-        results_df = pd.DataFrame(results)
-        mlflow.log_metrics({
-            "mean_latency_ms": results_df["latency_ms"].mean(),
-            "total_cost_usd": results_df["cost_usd"].sum(),
-            "mean_input_tokens": results_df["input_tokens"].mean(),
-            "mean_output_tokens": results_df["output_tokens"].mean(),
-        })
+            results_df = pd.DataFrame(results)
+            mlflow.log_metrics({
+                "mean_latency_ms": results_df["latency_ms"].mean(),
+                "total_cost_usd": results_df["cost_usd"].sum(),
+                "mean_input_tokens": results_df["input_tokens"].mean(),
+                "mean_output_tokens": results_df["output_tokens"].mean(),
+            })
 
-    print(
-        f"Done. Mean latency: {results_df['latency_ms'].mean():.0f} ms | "
-        f"Total cost: ${results_df['cost_usd'].sum():.6f}"
-    )
-    return products, results, results_df
+        df = pd.concat([products.reset_index(drop=True), results_df.reset_index(drop=True)], axis=1)
+        for _col in [
+            "fluency",
+            "grammar",
+            "tone",
+            "length",
+            "grounding",
+            "latency",
+            "cost",
+            "final_score",
+        ]:
+            df[_col] = ""
 
+        df.to_excel(ASSIGNMENT_XLSX_PATH, index=False)
+        print(
+            f"Done. Mean latency: {results_df['latency_ms'].mean():.0f} ms | "
+            f"Total cost: ${results_df['cost_usd'].sum():.6f}"
+        )
+        print(f"Saved {len(df)} rows to {ASSIGNMENT_XLSX_PATH}")
 
-@app.cell
-def _(mo):
-    mo.md(r"""## Build & Save DataFrame""")
-    return
-
-
-@app.cell
-def _(ASSIGNMENT_XLSX_PATH, pd, products, results_df):
-    df = pd.concat([products.reset_index(drop=True), results_df.reset_index(drop=True)], axis=1)
-
-    # Blank columns for all 7 criteria + final_score (filled in Task 3 by hand)
-    for _col in ["fluency", "grammar", "tone", "length", "grounding", "latency", "cost", "final_score"]:
-        df[_col] = ""
-
-    out_path = ASSIGNMENT_XLSX_PATH
-    df.to_excel(out_path, index=False)
-    print(f"Saved {len(df)} rows to {out_path}")
-    df.head()
-    return df, out_path
+    return df, ASSIGNMENT_XLSX_PATH
 
 
 @app.cell

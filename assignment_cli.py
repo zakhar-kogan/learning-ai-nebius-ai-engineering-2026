@@ -19,6 +19,7 @@ from src.paths import (  # noqa: E402
     PRODUCTS_CSV_PATH,
     html_export_path,
 )
+from src.task4_export import rebuild_task4_workbook  # noqa: E402
 
 TASK_NOTEBOOKS = {
     "task-01": APP_ROOT / "notebooks" / "01_rubric.py",
@@ -51,7 +52,7 @@ def export_commands() -> list[str]:
     for index, notebook_path in enumerate(TASK_NOTEBOOKS.values(), start=1):
         output_path = html_export_path(index)
         commands.append(
-            f"marimo export html {notebook_path.relative_to(APP_ROOT)} -o {output_path.relative_to(APP_ROOT)}"
+            f"uv run marimo export html {notebook_path.relative_to(APP_ROOT)} -o {output_path.relative_to(APP_ROOT)}"
         )
     return commands
 
@@ -90,20 +91,46 @@ def run_command(command: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Helpers for the Nebius AI Engineering assignment repo.")
+    parser = argparse.ArgumentParser(
+        description="Helpers for the Nebius AI Engineering assignment repo."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    plan_parser = subparsers.add_parser("plan", help="Print the execution plan and expected call volumes.")
-    plan_parser.add_argument("--dry-run", action="store_true", help="Accepted for symmetry; plan is always read-only.")
+    plan_parser = subparsers.add_parser(
+        "plan", help="Print the execution plan and expected call volumes."
+    )
+    plan_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Accepted for symmetry; plan is always read-only.",
+    )
 
-    open_parser = subparsers.add_parser("open", help="Print or launch the marimo command for a task notebook.")
+    open_parser = subparsers.add_parser(
+        "open", help="Print or launch the marimo command for a task notebook."
+    )
     open_parser.add_argument("task", choices=sorted(TASK_NOTEBOOKS.keys()))
-    open_parser.add_argument("--execute", action="store_true", help="Run the marimo command instead of only printing it.")
+    open_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Run the marimo command instead of only printing it.",
+    )
 
-    export_parser = subparsers.add_parser("export-html", help="Print or run HTML export commands for all notebooks.")
-    export_parser.add_argument("--execute", action="store_true", help="Run the export commands instead of only printing them.")
-    export_parser.add_argument("--dry-run", action="store_true", help="Only print the export commands.")
+    export_parser = subparsers.add_parser(
+        "export-html", help="Print or run HTML export commands for all notebooks."
+    )
+    export_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Run the export commands instead of only printing them.",
+    )
+    export_parser.add_argument(
+        "--dry-run", action="store_true", help="Only print the export commands."
+    )
 
+    subparsers.add_parser(
+        "rebuild-task4",
+        help="Rebuild the Task 4 workbook from persisted experiment CSVs without rerunning experiments.",
+    )
     args = parser.parse_args()
 
     if args.command == "plan":
@@ -127,6 +154,12 @@ def main() -> int:
             exit_code = run_command(command)
             if exit_code != 0:
                 return exit_code
+        return 0
+
+    if args.command == "rebuild-task4":
+        workbook_path, _, summary_df = rebuild_task4_workbook()
+        print(f"Task 4 workbook rebuilt: {workbook_path.relative_to(APP_ROOT)}")
+        print(summary_df.to_string(index=False))
         return 0
 
     return 1

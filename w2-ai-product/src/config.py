@@ -9,16 +9,23 @@ DEFAULT_FINAL_PROVIDER = "nebius"
 
 BASELINE_GENERATION_MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 IMPROVEMENT_GENERATION_MODEL_ID = "Qwen/Qwen3-30B-A3B-Instruct-2507"
-DEFAULT_JUDGE_MODEL_ID = "google/gemma-2-9b-it"
-
+DEFAULT_JUDGE_MODEL_ID = "google/gemma-2-9b-it-fast"
+DEFAULT_JUDGE_MAX_CONCURRENCY = 6
+MAX_JUDGE_MAX_CONCURRENCY = 8
 PROMPT_VERSION_V1 = "generation_v1"
 PROMPT_VERSION_V2 = "generation_v2"
+PROMPT_VERSION_V3 = "generation_v3_voice"
+PROMPT_VERSION_V4 = "generation_v4_scaffold"
+PROMPT_SELECTION_V1 = "generation_selector_v1"
 PROMPT_JUDGE_ALL = "judge_all"
 PROMPT_JUDGE_SINGLE = "judge_single"
 
 PROMPT_FILES: dict[str, Path] = {
     PROMPT_VERSION_V1: PROMPTS_DIR / "generation_v1.txt",
     PROMPT_VERSION_V2: PROMPTS_DIR / "generation_v2.txt",
+    PROMPT_VERSION_V3: PROMPTS_DIR / "generation_v3_voice.txt",
+    PROMPT_VERSION_V4: PROMPTS_DIR / "generation_v4_scaffold.txt",
+    PROMPT_SELECTION_V1: PROMPTS_DIR / "generation_selector_v1.txt",
     PROMPT_JUDGE_ALL: PROMPTS_DIR / "judge_all.txt",
     PROMPT_JUDGE_SINGLE: PROMPTS_DIR / "judge_single.txt",
 }
@@ -52,6 +59,24 @@ def get_judge_config() -> ModelConfig:
         provider=os.getenv("JUDGE_PROVIDER", DEFAULT_FINAL_PROVIDER),
         model_id=os.getenv("JUDGE_MODEL", DEFAULT_JUDGE_MODEL_ID),
     )
+
+
+def get_judge_max_concurrency() -> int:
+    raw_value = os.getenv("JUDGE_MAX_CONCURRENCY", str(DEFAULT_JUDGE_MAX_CONCURRENCY))
+    try:
+        value = int(raw_value)
+    except ValueError:
+        value = DEFAULT_JUDGE_MAX_CONCURRENCY
+    return max(1, min(value, MAX_JUDGE_MAX_CONCURRENCY))
+
+
+def get_force_rerun() -> bool:
+    return os.getenv("FORCE_RERUN", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def build_model_config(provider: str, model_id: str) -> ModelConfig:

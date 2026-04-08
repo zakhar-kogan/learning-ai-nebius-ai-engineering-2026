@@ -137,14 +137,21 @@ def compute_final_score(ratings: dict[str, str]) -> str:
 
 
 # ── Prompt rendering ─────────────────────────────────────────────────────────
-def render_rubric_for_prompt(judged_only: bool = True) -> str:
-    """Format rubric as plain text to embed in system prompts."""
+def render_rubric_for_prompt(
+    judged_only: bool = True,
+    extra_notes: dict[str, str] | None = None,
+) -> str:
+    """Format rubric as plain text to embed in prompts."""
     criteria = JUDGED_CRITERIA if judged_only else RUBRIC
+    note_by_name = {key.lower(): value for key, value in (extra_notes or {}).items()}
     lines = []
     for c in criteria:
         lines.append(f"### {c.name} — {c.description}")
         lines.append(f"- good: {c.good}")
         lines.append(f"- ok:   {c.ok}")
         lines.append(f"- bad:  {c.bad}")
+        note = note_by_name.get(c.name.lower())
+        if note:
+            lines.append(f"Note: {note}")
         lines.append("")
     return "\n".join(lines).strip()

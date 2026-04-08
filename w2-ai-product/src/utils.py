@@ -3,9 +3,12 @@ utils.py — shared helpers for product formatting, cost calculation, and async 
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Thread
 from typing import Any, Awaitable, Callable, TypeVar, cast
 
 import litellm
+from tqdm import tqdm
 from tqdm.asyncio import tqdm as atqdm
 
 from src.config import NEBIUS_RATE_COST_POLICY
@@ -68,8 +71,8 @@ async def run_async_batch(
     coro_fn: Callable[[T], Awaitable[R]],
     items: list[T],
     max_concurrency: int = 5,
-    desc: str = "Processing",
-) -> list[R]:
+    desc: str | None = None,
+ ) -> list[R]:
     """
     Run ``coro_fn(item)`` for each item, up to ``max_concurrency`` at a time.
 
@@ -83,7 +86,76 @@ async def run_async_batch(
             results[index] = await coro_fn(item)
 
     tasks = [asyncio.create_task(bounded(index, item)) for index, item in enumerate(items)]
-    for task in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc):
-        await task
+    if desc:
+        for task in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc=desc):
+            await task
+    else:
+        await asyncio.gather(*tasks)
+
+    return [cast(R, result) for result in results]
+
+def run_async_batch_sync(
+    coro_fn: Callable[[T], Awaitable[R]],
+    items: list[T],
+    max_concurrency: int = 5,
+    desc: str | None = None,
+ ) -> list[R]:
+    """
+    Run ``run_async_batch`` from synchronous code, including environments with an
+    already-running event loop such as marimo notebooks.
+    """
+    coroutine = run_async_batch(
+        coro_fn,
+        items,
+        max_concurrency=max_concurrency,
+        desc=desc,
+    )
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    task_result: list[R] | None = None
+    task_error: BaseException | None = None
+
+    def runner() -> None:
+        nonlocal task_error, task_result
+        try:
+            task_result = asyncio.run(coroutine)
+        except BaseException as exc:
+            task_error = exc
+
+    thread = Thread(target=runner, daemon=False)
+    thread.start()
+    thread.join()
+
+    if task_error is not None:
+        raise task_error
+    return cast(list[R], task_result)
+
+def run_sync_batch(
+    fn: Callable[[T], R],
+    items: list[T],
+    max_concurrency: int = 5,
+    desc: str | None = None,
+ ) -> list[R]:
+    """
+    Run synchronous ``fn(item)`` work in a bounded thread pool.
+
+    Returns results in the same order as ``items``.
+    """
+    results = cast(list[R | None], [None for _ in items])
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        futures = {
+            executor.submit(fn, item): index
+            for index, item in enumerate(items)
+        }
+        iterator = as_completed(futures)
+        if desc:
+            iterator = tqdm(iterator, total=len(futures), desc=desc)
+        for future in iterator:
+            results[futures[future]] = future.result()
 
     return [cast(R, result) for result in results]
