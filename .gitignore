@@ -223,11 +223,13 @@ w2-ai-product/outputs/*
 w2-ai-product/outputs/html/*
 !w2-ai-product/outputs/html/.gitkeep
 !w2-ai-product/outputs/html/task_*.html
+!w2-ai-product/outputs/ipynb/
+w2-ai-product/outputs/ipynb/*
+!w2-ai-product/outputs/ipynb/task_*.ipynb
 
 # Generated intermediate artifacts kept ignored
 !w2-ai-product/outputs/reports/
 w2-ai-product/outputs/reports/*
 !w2-ai-product/outputs/reports/.gitkeep
-w2-ai-product/outputs/ipynb/
 w2-ai-product/mlruns/
 w2-ai-product/notebooks/mlruns/

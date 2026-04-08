@@ -84,7 +84,15 @@ These steps are intentionally manual and should not be automated away:
 ## Submission artifacts
 The final submission artifacts live under `w2-ai-product/outputs/`.
 
-Notebook exports:
+GitHub-renderable notebook exports:
+- `w2-ai-product/outputs/ipynb/task_01.ipynb`
+- `w2-ai-product/outputs/ipynb/task_02.ipynb`
+- `w2-ai-product/outputs/ipynb/task_03.ipynb`
+- `w2-ai-product/outputs/ipynb/task_04.ipynb`
+- `w2-ai-product/outputs/ipynb/task_05.ipynb`
+- `w2-ai-product/outputs/ipynb/task_06.ipynb`
+
+HTML notebook exports:
 - `w2-ai-product/outputs/html/task_01.html`
 - `w2-ai-product/outputs/html/task_02.html`
 - `w2-ai-product/outputs/html/task_03.html`
@@ -97,6 +105,8 @@ Spreadsheet / table deliverables:
 - `w2-ai-product/outputs/task_04_experiments.xlsx` — Task 4 experiment comparison workbook
 - `w2-ai-product/outputs/task_05_judge_sanity.csv` — Task 5 judge sanity-check outputs
 - `w2-ai-product/outputs/task_06_judged_experiments.csv` — Task 6 full judge results and analysis table
+
+For GitHub browsing, prefer the `.ipynb` files above because GitHub renders them inline. The HTML files are still included as exported notebook deliverables.
 
 Additional generated runtime artifacts may also appear under `w2-ai-product/outputs/`, but the files above are the intended submission set.
 
