@@ -231,5 +231,7 @@ w2-ai-product/outputs/ipynb/*
 !w2-ai-product/outputs/reports/
 w2-ai-product/outputs/reports/*
 !w2-ai-product/outputs/reports/.gitkeep
+!w2-ai-product/outputs/reports/task_04_experiments/
+!w2-ai-product/outputs/reports/task_04_experiments/*.csv
 w2-ai-product/mlruns/
-w2-ai-product/notebooks/mlruns/
+w2-ai-product/backups/local/
