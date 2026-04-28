@@ -1,0 +1,9 @@
+experiment,change,correctness,faithfulness,page_hit_at_1,page_hit_at_3,page_hit_at_5
+baseline,"Task 6 baseline: chunk_size=1000, overlap=150, k=4",0.26,0.312,0.2,0.33,0.4
+prompt_v2,Stricter generation prompt with explicit citation discipline,0.28,0.271,0.2,0.33,0.4
+k_8,Increase chunks passed to generator from 4 to 8,0.35,0.538,0.2,0.33,0.4
+chunk_500,Rebuild FAISS with chunk_size=500 and overlap=75,0.18,0.318,0.17,0.3,0.36
+reranker,"Retrieve top 20 with FAISS, rerank to 4 with bge-reranker-base",0.29,0.337,0.13,0.22,0.3
+embedding_gemini_2,Rebuild FAISS with gemini-embedding-2 embeddings,0.4,0.451,0.34,0.52,0.65
+embedding_gemini_2_k8,Use gemini-embedding-2 embeddings with k=8,0.51,0.593,0.34,0.52,0.65
+hybrid_bm25_gemini_2_k8,"Fuse BM25 lexical retrieval with gemini-embedding-2 semantic retrieval, k=8",0.38,0.451,0.23,0.39,0.5

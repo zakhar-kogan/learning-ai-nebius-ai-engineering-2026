@@ -2,7 +2,8 @@
   "include": [
     "assignment_cli.py",
     "tests",
-    "w2-ai-product"
+    "w2-ai-product",
+    "ai-product-2"
   ],
   "venvPath": ".",
   "venv": ".venv",

@@ -1,0 +1,104 @@
+financebench_id,question_type,question,naive_answer,ground_truth,verdict
+financebench_id_00005,domain-relevant,"Does Corning have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.","To determine if Corning has positive working capital based on FY2022 data, we need to calculate the working capital. Working capital is calculated as current assets minus current liabilities.
+
+According to Corning's FY2022 annual report (10-K filing), the company's current assets and current liabilities are:
+
+* Current assets: $9,444 million (as of December 31, 2022)
+* Current liabilities: $6,341 million (as of December 31, 2022)
+
+Working capital = Current assets - Current liabilities
+= $9,444 million - $6,341 million
+= $3,103 million
+
+Since the working capital is positive ($3,103 million), Corning has positive working capital based on FY2022 data.
+
+Working capital is a relevant metric for Corning, as it is a manufacturing company with significant inventories, accounts receivable, and accounts payable. The company's working capital management is important to ensure it has sufficient liquidity to meet its short-term obligations and take advantage of business opportunities. However, it's worth noting that Corning's working capital requirements may be influenced by its business model, industry, and supply chain, so a more detailed analysis of the company's financials and operations would be necessary to fully understand the significance of its working capital position.",Yes. Corning had a positive working capital amount of $831 million by FY 2022 close. This answer considers only operating current assets and current liabilities that were clearly shown in the balance sheet.,
+financebench_id_00070,domain-relevant,"Does American Water Works have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.","To determine if American Water Works has positive working capital, we need to look at its FY2022 financial data. Working capital is calculated as current assets minus current liabilities.
+
+According to American Water Works' FY2022 annual report (10-K filing), the company's current assets and current liabilities are:
+
+* Current assets: $1.43 billion
+* Current liabilities: $2.33 billion
+
+Working capital = Current assets - Current liabilities
+= $1.43 billion - $2.33 billion
+= -$0.90 billion
+
+Based on this calculation, American Water Works has negative working capital of $0.90 billion as of FY2022.
+
+However, it's essential to consider the nature of American Water Works' business. As a utility company, it has a significant amount of long-term assets, such as water treatment plants, distribution systems, and other infrastructure. The company's business model is characterized by high capital expenditures, long-term debt financing, and regulated revenue streams.
+
+In this context, working capital might not be the most relevant metric for evaluating American Water Works' financial health. The company's ability to generate cash flows from its regulated operations, manage its long-term debt, and invest in its infrastructure is more critical to its financial sustainability.
+
+Additionally, utility companies like American Water Works often have negative working capital due to the timing of their cash flows. They may receive payments from customers in advance of providing services, which can result in a deficit in current assets compared to current liabilities. Nevertheless, this does not necessarily indicate a liquidity problem, as the company can rely on its ongoing operations and access to capital markets to meet its financial obligations.
+
+In conclusion, while American Water Works has negative working capital based on FY2022 data, this metric might not be the most useful or relevant indicator of the company's financial health, given the nature of its business and industry.","No, American Water Works had negative working capital of -$1561M in FY 2022.",
+financebench_id_00080,domain-relevant,"Does Paypal have positive working capital based on FY2022 data? If working capital is not a useful or relevant metric for this company, then please state that and explain why.","To determine if PayPal has positive working capital, we need to calculate it using the FY2022 data. Working capital is calculated as:
+
+Working Capital = Current Assets - Current Liabilities
+
+According to PayPal's FY2022 annual report (10-K filing), the relevant data is:
+
+* Current Assets: $63,851 million (includes cash and cash equivalents, accounts receivable, and other current assets)
+* Current Liabilities: $24,444 million (includes accounts payable, accrued expenses, and other current liabilities)
+
+Now, let's calculate the working capital:
+
+Working Capital = $63,851 million - $24,444 million = $39,407 million
+
+Since the result is positive, PayPal has positive working capital based on FY2022 data.
+
+Working capital is a relevant metric for PayPal, as it indicates the company's ability to meet its short-term obligations and invest in its operations. As a digital payment platform, PayPal's business model involves managing large amounts of cash and facilitating transactions, making working capital an important aspect of its financial health.
+
+However, it's worth noting that PayPal's business model is also heavily reliant on its ability to manage its payment processing volumes, transaction fees, and interest income on its cash and investment portfolios. Therefore, other metrics such as revenue growth, transaction volume, and net interest income may be more relevant to evaluating the company's overall financial performance. Nonetheless, working capital remains a useful metric to assess PayPal's liquidity and short-term financial stability.",Yes. Paypal has a positive working capital of $ 1.6Bn as of FY2022 end.,
+financebench_id_00206,domain-relevant,"Are JPM's gross margins historically consistent (not fluctuating more than roughly 2% each year)? If gross margins are not a relevant metric for a company like this, then please state that and explain why.","JPMorgan Chase (JPM) is a multinational bank and financial services company, and as such, its financial performance is not typically evaluated using gross margins. Gross margins are a relevant metric for companies that produce and sell goods, as they measure the difference between revenue and the cost of goods sold.
+
+For a bank like JPM, the primary source of revenue is not from selling goods, but rather from interest income, fees, and commissions. Therefore, gross margins are not a relevant metric for evaluating JPM's financial performance.
+
+Instead, analysts and investors typically focus on other metrics, such as:
+
+1. Net interest margin (NIM): This measures the difference between the interest income earned on assets and the interest expense paid on liabilities.
+2. Non-interest income as a percentage of total revenue: This measures the proportion of revenue generated from non-interest sources, such as fees and commissions.
+3. Efficiency ratio: This measures the ratio of non-interest expenses to total revenue.
+4. Return on assets (ROA) and return on equity (ROE): These measure the bank's profitability relative to its assets and equity, respectively.
+
+These metrics provide a more accurate picture of JPM's financial performance and are more relevant to its business model. If you're interested in evaluating JPM's historical consistency in these metrics, I can provide more information on that.","Since JPM is a financial institution, gross margin is not a relevant metric.",
+financebench_id_00215,domain-relevant,Is Verizon a capital intensive business based on FY 2022 data?,"To determine if Verizon is a capital-intensive business, we need to analyze its financial statements, specifically the balance sheet and income statement, for FY 2022.
+
+Here are some key metrics that can help us determine if Verizon is capital-intensive:
+
+1. **Capital Expenditures (CapEx)**: This represents the amount spent on property, plant, and equipment (PP&E) to maintain or expand the business.
+2. **Depreciation and Amortization**: This represents the non-cash expense of asset depreciation and amortization, which can indicate the level of capital investment.
+3. **Property, Plant, and Equipment (PP&E)**: This represents the total value of Verizon's physical assets, such as network infrastructure, towers, and equipment.
+4. **Return on Assets (ROA)**: This metric shows how efficiently Verizon generates profits from its assets.
+
+According to Verizon's FY 2022 annual report (10-K filing), here are the relevant numbers:
+
+* **CapEx**: $22.4 billion (up from $18.3 billion in FY 2021)
+* **Depreciation and Amortization**: $20.3 billion (up from $18.4 billion in FY 2021)
+* **PP&E**: $144.8 billion (up from $134.4 billion in FY 2021)
+* **ROA**: 4.4% (down from 5.1% in FY 2021)
+
+Now, let's analyze these numbers:
+
+* Verizon's CapEx as a percentage of revenue is around 14.5% (22.4 billion / 154.2 billion in revenue), which is relatively high.
+* The company's Depreciation and Amortization expense is significant, indicating a substantial investment in physical assets.
+* The PP&E balance is large, representing about 55% of Verizon's total assets.
+* The ROA is relatively low, indicating that Verizon's assets are not generating extremely high returns.
+
+Based on these metrics, it appears that Verizon is indeed a capital-intensive business. The company requires significant investments in network infrastructure, equipment, and other physical assets to maintain and expand its operations. The high CapEx and Depreciation and Amortization expenses, combined with the large PP&E balance, support this conclusion.
+
+As a capital-intensive business, Verizon's financial performance is likely to be influenced by its ability to manage its asset base efficiently, invest in new technologies, and generate sufficient returns on its investments.","Yes. Verizon's capital intensity ratio was approximately 2.774729. This means that it took approximately $2.77 of assets to generate $1 of revenue and thus, Verizon can be considered capital intensive.",
+financebench_id_00283,novel-generated,How much does Pfizer expect to pay to spin off Upjohn in the future in USD million?,Pfizer expects to pay approximately $12 billion USD in the future to spin off Upjohn.,77.78,
+financebench_id_00288,novel-generated,Was there any drop in Cash & Cash equivalents between FY 2023 and Q2 of FY2024?,"I don't have access to real-time financial data or specific company information. To answer your question, I would need to know the company you are referring to and have access to their financial statements for FY 2023 and Q2 of FY 2024.
+
+If you provide me with the company name or the specific financial data, I can help you analyze the change in Cash & Cash equivalents between the two periods. Alternatively, you can also check the company's official website, financial reports, or reputable financial news sources for the most up-to-date information.","Yes, there was a decline of ~42% between FY2023 and Q2 of FY 2024.",
+financebench_id_00299,novel-generated,Which of JPM's business segments had the lowest net revenue in 2021 Q1?,"According to JPMorgan Chase's Q1 2021 earnings report, the business segment with the lowest net revenue was Corporate & Investment Bank - Corporate segment, but more specifically, the ""Corporate"" segment had $234 million in net revenue.",Corporate. Its net revenue was -$473 million.,
+financebench_id_00302,novel-generated,Did Pfizer grow its PPNE between FY20 and FY21?,"Pfizer did grow its Pharmaceutical Pipeline, Portfolio, and New Enterprise (PPNE,  however now referred to as Innovative Health or IH, and Essential Health or EH, then Biopharma in 2022), between FY20 and FY21.
+
+In FY20, Pfizer reported revenues of $48.8 billion for its Biopharmaceuticals segment. 
+
+In FY21, Pfizer reported revenues of $81.3 billion for its Biopharmaceuticals segment.
+
+This represents a significant increase of 66.6% in revenues for the segment.","Yes, change in PPNE was positive year over year",
+financebench_id_00382,novel-generated,Which region had the Highest EBITDAR Contribution for MGM during FY2022?,"I don't have access to real-time data or specific financial reports for MGM (MGM Resorts International) for FY2022, including details on EBITDAR (Earnings Before Interest, Taxes, Depreciation, Amortization, and Rent) contributions by region. For the most accurate and up-to-date information, I recommend checking MGM's official financial reports or investor presentations for FY2022. These documents should provide a detailed breakdown of their financial performance, including EBITDAR contributions by region.",Las Vegas resorts contributed ~90% of company level EBITDAR during FY2022.,

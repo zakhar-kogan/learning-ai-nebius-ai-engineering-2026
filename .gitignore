@@ -218,6 +218,10 @@ w2-ai-product/outputs/*
 !w2-ai-product/outputs/assignment_01.xlsx
 !w2-ai-product/outputs/task_04_experiments.xlsx
 !w2-ai-product/outputs/task_05_judge_sanity.csv
+
+# Assignment 2 generated/downloaded heavy artifacts
+ai-product-2/**/*.pdf
+ai-product-2/outputs/assignment2/vectorstores/
 !w2-ai-product/outputs/task_06_judged_experiments.csv
 !w2-ai-product/outputs/html/
 w2-ai-product/outputs/html/*

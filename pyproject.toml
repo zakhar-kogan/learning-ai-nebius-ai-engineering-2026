@@ -12,9 +12,11 @@ dependencies = [
     "mlflow",
     "tqdm",
     "tenacity",
-    "marimo>=0.22.4",
-    "seaborn>=0.13.2",
-    "nbformat>=5.10.4",
+    "seaborn",
+    "nbformat",
+    "langchain",
+    "marimo>=0.23.3",
+    "pip>=26.1",
 ]
 
 [tool.uv]
