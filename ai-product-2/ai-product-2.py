@@ -208,12 +208,16 @@ def _(Path, load_dotenv, os):
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
     NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", default="insert-your-nebius-api-key-here").strip()
     NEBIUS_BASE_URL = os.getenv("NEBIUS_BASE_URL", default="https://api.tokenfactory.nebius.com/v1/").strip()
+    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+    NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", default="https://integrate.api.nvidia.com/v1").strip()
 
     # ── Model selection ──────────────────────────────────────────────────
     GENERATION_MODEL = os.getenv("ASSIGNMENT2_GENERATION_MODEL", default="meta-llama/Llama-3.3-70B-Instruct").strip()
     JUDGE_MODEL = os.getenv("ASSIGNMENT2_JUDGE_MODEL", default="deepseek-ai/DeepSeek-V3.2").strip()
     EMBEDDING_MODEL = os.getenv("ASSIGNMENT2_EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5").strip()
     RERANKER_MODEL = os.getenv("ASSIGNMENT2_RERANKER_MODEL", default="BAAI/bge-reranker-base").strip()
+    QUERY_ROUTER_MODEL = os.getenv("ASSIGNMENT2_QUERY_ROUTER_MODEL", default="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning").strip()
+    QUERY_ROUTER_MAX_TOKENS = int(os.getenv("ASSIGNMENT2_QUERY_ROUTER_MAX_TOKENS", "512"))
 
     # ── Evaluation parameters ────────────────────────────────────────────
     FAITHFULNESS_LIMIT = int(os.getenv("FAITHFULNESS_LIMIT", "20"))
@@ -238,6 +242,7 @@ def _(Path, load_dotenv, os):
     TASK7_EXPERIMENT_CACHE_PATH = ASSIGNMENT2_CACHE_DIR / "task7_experiments.jsonl"
     return (
         ALLOW_DOWNLOADS,
+        ASSIGNMENT2_CACHE_DIR,
         ASSIGNMENT2_COMPARE_BASE,
         ASSIGNMENT2_DATA_DIR,
         ASSIGNMENT2_EVAL_BASE,
@@ -257,8 +262,11 @@ def _(Path, load_dotenv, os):
         JUDGE_MODEL,
         NEBIUS_API_KEY,
         NEBIUS_BASE_URL,
+        NVIDIA_API_KEY,
+        NVIDIA_BASE_URL,
         OUTPUT_FORMAT,
         PAGE_HIT_K_VALUES,
+        QUERY_ROUTER_MODEL,
         RERANKER_MODEL,
         RETRY_ERRORS,
         RUN_EXPENSIVE_EVALS,
@@ -3358,11 +3366,1079 @@ def _(
 
 @app.cell
 def _(
+    ASSIGNMENT2_CACHE_DIR,
+    ASSIGNMENT2_VECTORSTORE_DIR,
+    BASELINE_CHUNK_OVERLAP,
+    BASELINE_CHUNK_SIZE,
+    FORCE_RERUN,
+    NVIDIA_API_KEY,
+    NVIDIA_BASE_URL,
+    Path,
+    QUERY_ROUTER_MODEL,
+    RUN_EXPENSIVE_EVALS,
+    build_or_load_vectorstore,
+    json,
+    pd,
+    referenced_documents_df,
+    source_fingerprint,
+    tqdm,
+):
+    import ast as _ast
+    import os as _os
+    import re
+
+    import numpy as np
+    from pydantic import BaseModel as _BaseModel
+    from pydantic import Field as _Field
+    from pydantic import ValidationError as _ValidationError
+    from pydantic import field_validator as _field_validator
+    from tenacity import retry as _retry
+    from tenacity import stop_after_attempt as _stop_after_attempt
+    from tenacity import wait_exponential as _wait_exponential
+
+    task7_graph_query_router_max_tokens = int(
+        _os.getenv("ASSIGNMENT2_QUERY_ROUTER_MAX_TOKENS", "512")
+    )
+
+    task7_graph_vectorstore_config = {
+        "embedding_model": "gemini/gemini-embedding-2",
+        "vectorstore_name": "faiss_gemini_embedding2_chunk1000",
+        "chunk_size": BASELINE_CHUNK_SIZE,
+        "chunk_overlap": BASELINE_CHUNK_OVERLAP,
+    }
+
+    def task7_graph_vectorstore_manifest() -> dict:
+        task7_graph_doc_fingerprints = []
+        for task7_graph_doc_row in referenced_documents_df.to_dict("records"):
+            task7_graph_doc_fingerprints.append(
+                {
+                    "doc_name": task7_graph_doc_row["doc_name"],
+                    "company": task7_graph_doc_row.get("company", ""),
+                    "doc_period": task7_graph_doc_row.get("doc_period", ""),
+                    "fingerprint": source_fingerprint(Path(task7_graph_doc_row["pdf_path"])),
+                }
+            )
+        return {
+            "embedding_model": task7_graph_vectorstore_config["embedding_model"],
+            "chunk_size": task7_graph_vectorstore_config["chunk_size"],
+            "chunk_overlap": task7_graph_vectorstore_config["chunk_overlap"],
+            "documents": task7_graph_doc_fingerprints,
+        }
+
+    task7_graph_vectorstore_path = (
+        ASSIGNMENT2_VECTORSTORE_DIR
+        / task7_graph_vectorstore_config["vectorstore_name"]
+    )
+    task7_graph_vectorstore = (
+        build_or_load_vectorstore(
+            documents_df=referenced_documents_df,
+            vectorstore_path=task7_graph_vectorstore_path,
+            manifest_path=task7_graph_vectorstore_path / "manifest.json",
+            manifest_payload=task7_graph_vectorstore_manifest(),
+            embedding_model=task7_graph_vectorstore_config["embedding_model"],
+            chunk_size=task7_graph_vectorstore_config["chunk_size"],
+            chunk_overlap=task7_graph_vectorstore_config["chunk_overlap"],
+            force_rebuild=FORCE_RERUN,
+        )
+        if RUN_EXPENSIVE_EVALS
+        else None
+    )
+
+    def task7_graph_document_category(task7_graph_doc_name: str) -> str:
+        task7_graph_upper_name = str(task7_graph_doc_name).upper()
+        if "10Q" in task7_graph_upper_name or "10-Q" in task7_graph_upper_name:
+            return "10Q"
+        if "10K" in task7_graph_upper_name or "10-K" in task7_graph_upper_name:
+            return "10K"
+        if "8K" in task7_graph_upper_name or "8-K" in task7_graph_upper_name:
+            return "8K"
+        if "EARN" in task7_graph_upper_name:
+            return "earnings"
+        return ""
+
+    def task7_graph_document_year(
+        task7_graph_doc_name: str,
+        task7_graph_doc_period: object,
+    ) -> str:
+        if str(task7_graph_doc_period).strip():
+            return str(task7_graph_doc_period).strip()
+        task7_graph_year_match = re.search(r"(20\d{2})", str(task7_graph_doc_name))
+        return task7_graph_year_match.group(1) if task7_graph_year_match else ""
+
+    def task7_graph_doc_to_chunk(
+        task7_graph_doc,
+        *,
+        task7_graph_chunk_id: str = "",
+        task7_graph_faiss_index: int | None = None,
+        task7_graph_score: float | None = None,
+        task7_graph_rank: int | None = None,
+    ) -> dict:
+        return {
+            "chunk_id": task7_graph_chunk_id,
+            "faiss_index": task7_graph_faiss_index,
+            "rank": task7_graph_rank,
+            "score": task7_graph_score,
+            "doc_name": task7_graph_doc.metadata.get("doc_name", ""),
+            "page_number": task7_graph_doc.metadata.get("page_number", ""),
+            "company": task7_graph_doc.metadata.get("company", ""),
+            "doc_period": task7_graph_doc.metadata.get("doc_period", ""),
+            "year": task7_graph_document_year(
+                task7_graph_doc.metadata.get("doc_name", ""),
+                task7_graph_doc.metadata.get("doc_period", ""),
+            ),
+            "category": task7_graph_document_category(
+                task7_graph_doc.metadata.get("doc_name", "")
+            ),
+            "content": task7_graph_doc.page_content,
+        }
+
+    def task7_graph_build_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+        if task7_graph_vectorstore is None:
+            return pd.DataFrame(), pd.DataFrame()
+
+        task7_graph_docstore = task7_graph_vectorstore.docstore._dict
+        task7_graph_index_map = task7_graph_vectorstore.index_to_docstore_id
+        task7_graph_node_rows = []
+        for task7_graph_faiss_index, task7_graph_docstore_id in task7_graph_index_map.items():
+            task7_graph_doc = task7_graph_docstore[task7_graph_docstore_id]
+            task7_graph_doc_name = task7_graph_doc.metadata.get("doc_name", "")
+            task7_graph_doc_period = task7_graph_doc.metadata.get("doc_period", "")
+            task7_graph_chunk_id = f"chunk_{task7_graph_faiss_index}"
+            task7_graph_node_rows.append(
+                {
+                    "chunk_id": task7_graph_chunk_id,
+                    "faiss_index": int(task7_graph_faiss_index),
+                    "docstore_id": task7_graph_docstore_id,
+                    "doc_name": task7_graph_doc_name,
+                    "company": task7_graph_doc.metadata.get("company", ""),
+                    "doc_period": task7_graph_doc_period,
+                    "year": task7_graph_document_year(
+                        task7_graph_doc_name,
+                        task7_graph_doc_period,
+                    ),
+                    "category": task7_graph_document_category(task7_graph_doc_name),
+                    "page_number": task7_graph_doc.metadata.get("page_number", ""),
+                    "content": task7_graph_doc.page_content,
+                }
+            )
+
+        task7_graph_nodes_df = pd.DataFrame(task7_graph_node_rows)
+        task7_graph_edge_rows = []
+        if not task7_graph_nodes_df.empty:
+            for task7_graph_group_columns, task7_graph_edge_type in [
+                (["doc_name"], "same_document"),
+                (["doc_name", "page_number"], "same_page"),
+                (["company"], "same_company"),
+                (["company", "year"], "same_company_year"),
+                (["category"], "same_filing_type"),
+            ]:
+                task7_graph_grouped = task7_graph_nodes_df.groupby(
+                    task7_graph_group_columns,
+                    dropna=False,
+                )
+                for _, task7_graph_group_df in task7_graph_grouped:
+                    task7_graph_group_ids = task7_graph_group_df["chunk_id"].tolist()
+                    if len(task7_graph_group_ids) < 2:
+                        continue
+                    for task7_graph_from_id, task7_graph_to_id in zip(
+                        task7_graph_group_ids[:-1],
+                        task7_graph_group_ids[1:],
+                        strict=False,
+                    ):
+                        task7_graph_edge_rows.append(
+                            {
+                                "from_id": task7_graph_from_id,
+                                "to_id": task7_graph_to_id,
+                                "connection_type": task7_graph_edge_type,
+                                "strength": 0.5,
+                                "metadata": json.dumps(
+                                    {
+                                        "group_columns": task7_graph_group_columns,
+                                    },
+                                    ensure_ascii=True,
+                                ),
+                            }
+                        )
+        return task7_graph_nodes_df, pd.DataFrame(task7_graph_edge_rows)
+
+    task7_graph_chunk_nodes_df, task7_graph_chunk_edges_df = task7_graph_build_tables()
+
+    task7_graph_document_ontology_cache_path = (
+        ASSIGNMENT2_CACHE_DIR / "task7_graph_document_ontology.jsonl"
+    )
+
+    def task7_graph_json_from_text(task7_graph_text: str) -> dict:
+        task7_graph_stripped_text = task7_graph_text.strip()
+        task7_graph_fenced_match = re.search(
+            r"```(?:json)?\s*(.*?)```",
+            task7_graph_stripped_text,
+            re.S,
+        )
+        if task7_graph_fenced_match:
+            task7_graph_stripped_text = task7_graph_fenced_match.group(1).strip()
+        task7_graph_object_match = re.search(r"\{.*\}", task7_graph_stripped_text, re.S)
+        if task7_graph_object_match:
+            task7_graph_stripped_text = task7_graph_object_match.group(0)
+        try:
+            return json.loads(task7_graph_stripped_text)
+        except json.JSONDecodeError:
+            try:
+                return _ast.literal_eval(task7_graph_stripped_text)
+            except (SyntaxError, ValueError):
+                task7_graph_loose_result = task7_graph_loose_metadata_from_text(
+                    task7_graph_text
+                )
+                if task7_graph_loose_result:
+                    return task7_graph_loose_result
+                raise
+
+    def task7_graph_loose_metadata_from_text(task7_graph_text: str) -> dict:
+        task7_graph_loose_result = {}
+        task7_graph_category_match = re.search(
+            r"\bcategory\b\s*[:=]\s*[\"'`]?([A-Za-z0-9_-]+)",
+            task7_graph_text,
+            re.I,
+        )
+        if task7_graph_category_match:
+            task7_graph_loose_result["category"] = task7_graph_category_match.group(1)
+        task7_graph_year_match = re.search(
+            r"\byear\b\s*[:=]\s*[\"'`]?(20\d{2})",
+            task7_graph_text,
+            re.I,
+        )
+        if task7_graph_year_match:
+            task7_graph_loose_result["year"] = task7_graph_year_match.group(1)
+        task7_graph_company_match = re.search(
+            r"\bcompany\b\s*[:=]\s*[\"'`]?([^,\n}]+)",
+            task7_graph_text,
+            re.I,
+        )
+        if task7_graph_company_match:
+            task7_graph_loose_result["company"] = task7_graph_company_match.group(1).strip(" \"'`")
+        task7_graph_topics_match = re.search(
+            r"\b(?:primary_topics|metric_terms)\b\s*[:=]\s*\[([^\]]*)\]",
+            task7_graph_text,
+            re.I | re.S,
+        )
+        if task7_graph_topics_match:
+            task7_graph_loose_result["primary_topics"] = [
+                task7_graph_topic.strip(" \"'`\n\t")
+                for task7_graph_topic in task7_graph_topics_match.group(1).split(",")
+                if task7_graph_topic.strip(" \"'`\n\t")
+            ]
+            task7_graph_loose_result["metric_terms"] = task7_graph_loose_result[
+                "primary_topics"
+            ]
+        return task7_graph_loose_result
+
+    def task7_graph_call_and_parse(
+        *,
+        task7_graph_messages: list[dict],
+        task7_graph_model_cls,
+        task7_graph_extra_payload: dict | None = None,
+    ):
+        import litellm
+
+        @_retry(
+            stop=_stop_after_attempt(3),
+            wait=_wait_exponential(multiplier=1, min=1, max=8),
+            reraise=True,
+        )
+        def task7_graph_call_once():
+            task7_graph_response = litellm.completion(
+                model=f"nvidia_nim/{QUERY_ROUTER_MODEL}",
+                api_key=NVIDIA_API_KEY,
+                api_base=NVIDIA_BASE_URL,
+                messages=task7_graph_messages,
+                temperature=0.0,
+                max_tokens=task7_graph_query_router_max_tokens,
+                timeout=60,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+            task7_graph_raw_content = task7_graph_response.choices[0].message.content
+            task7_graph_parsed_payload = task7_graph_json_from_text(
+                task7_graph_raw_content
+            ) or task7_graph_loose_metadata_from_text(task7_graph_raw_content)
+            if task7_graph_extra_payload:
+                task7_graph_parsed_payload = {
+                    **task7_graph_parsed_payload,
+                    **task7_graph_extra_payload,
+                }
+            return task7_graph_model_cls.model_validate(task7_graph_parsed_payload)
+
+        return task7_graph_call_once()
+
+    class Task7GraphDocumentOntology(_BaseModel):
+        doc_name: str
+        category: str = ""
+        year: str = ""
+        primary_topics: list[str] = _Field(default_factory=list)
+
+        @_field_validator("year", mode="before")
+        @classmethod
+        def coerce_year(cls, task7_graph_year_value):
+            return "" if task7_graph_year_value is None else str(task7_graph_year_value)
+
+    def task7_graph_load_document_ontology_cache() -> dict[str, dict]:
+        if not task7_graph_document_ontology_cache_path.exists():
+            return {}
+        task7_graph_cache_rows = {}
+        for task7_graph_cache_line in task7_graph_document_ontology_cache_path.read_text(
+            encoding="utf-8"
+        ).splitlines():
+            if not task7_graph_cache_line.strip():
+                continue
+            try:
+                task7_graph_cache_row = json.loads(task7_graph_cache_line)
+            except json.JSONDecodeError:
+                continue
+            task7_graph_doc_name = str(task7_graph_cache_row.get("doc_name", ""))
+            if task7_graph_doc_name:
+                task7_graph_cache_rows[task7_graph_doc_name] = task7_graph_cache_row
+        return task7_graph_cache_rows
+
+    def task7_graph_fallback_document_ontology(
+        task7_graph_doc_name: str,
+        task7_graph_doc_df: pd.DataFrame,
+    ) -> dict:
+        task7_graph_doc_period = (
+            str(task7_graph_doc_df["doc_period"].dropna().iloc[0])
+            if not task7_graph_doc_df["doc_period"].dropna().empty
+            else ""
+        )
+        task7_graph_topics = sorted(
+            {
+                task7_graph_topic_match.group(0).lower()
+                for task7_graph_content in task7_graph_doc_df["content"].head(8).astype(str)
+                for task7_graph_topic_match in re.finditer(
+                    r"\b(cash|revenue|sales|margin|ebitda|ebitdar|assets|liabilities|debt|inventory|working capital|capex|dividend|income|earnings)\b",
+                    task7_graph_content,
+                    re.I,
+                )
+            }
+        )[:12]
+        return {
+            "doc_name": task7_graph_doc_name,
+            "category": task7_graph_document_category(task7_graph_doc_name),
+            "year": task7_graph_document_year(
+                task7_graph_doc_name,
+                task7_graph_doc_period,
+            ),
+            "primary_topics": task7_graph_topics,
+        }
+
+    def task7_graph_infer_document_ontology(
+        task7_graph_doc_name: str,
+        task7_graph_doc_df: pd.DataFrame,
+    ) -> dict:
+        task7_graph_fallback = task7_graph_fallback_document_ontology(
+            task7_graph_doc_name,
+            task7_graph_doc_df,
+        )
+        if not NVIDIA_API_KEY:
+            return task7_graph_fallback
+        try:
+            task7_graph_doc_sample = "\n\n".join(
+                task7_graph_doc_df["content"].head(3).astype(str).tolist()
+            )[:1800]
+            task7_graph_company = (
+                str(task7_graph_doc_df["company"].dropna().iloc[0])
+                if not task7_graph_doc_df["company"].dropna().empty
+                else ""
+            )
+            task7_graph_llm_result = task7_graph_call_and_parse(
+                task7_graph_messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Classify this financial filing for retrieval metadata. "
+                            "Return JSON with doc_name, category, year, primary_topics. "
+                            "category must be one of 10K, 10Q, 8K, earnings, or empty string. "
+                            "primary_topics should be short finance terms found or strongly implied."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"doc_name: {task7_graph_doc_name}\n"
+                            f"company: {task7_graph_company}\n"
+                            f"sample:\n{task7_graph_doc_sample}"
+                        ),
+                    },
+                ],
+                task7_graph_model_cls=Task7GraphDocumentOntology,
+                task7_graph_extra_payload={"doc_name": task7_graph_doc_name},
+            ).model_dump()
+        except Exception as task7_graph_ontology_exc:
+            print(
+                "[task7_graph_ontology] Falling back to deterministic ontology: "
+                f"{repr(task7_graph_ontology_exc)[:200]}"
+            )
+            return task7_graph_fallback
+
+        for task7_graph_ontology_key in ["category", "year"]:
+            if not task7_graph_llm_result.get(task7_graph_ontology_key):
+                task7_graph_llm_result[task7_graph_ontology_key] = task7_graph_fallback.get(
+                    task7_graph_ontology_key,
+                    "",
+                )
+        task7_graph_llm_result["primary_topics"] = sorted(
+            set(task7_graph_llm_result.get("primary_topics", []))
+            | set(task7_graph_fallback.get("primary_topics", []))
+        )[:16]
+        return task7_graph_llm_result
+
+    def task7_graph_build_document_ontology_table() -> pd.DataFrame:
+        if task7_graph_chunk_nodes_df.empty:
+            return pd.DataFrame()
+        task7_graph_cached_ontology = task7_graph_load_document_ontology_cache()
+        task7_graph_ontology_rows = []
+        task7_graph_doc_groups = list(task7_graph_chunk_nodes_df.groupby(
+            "doc_name",
+            dropna=False,
+        ))
+        for task7_graph_doc_name, task7_graph_doc_df in tqdm(
+            task7_graph_doc_groups,
+            desc="[task7_graph_ontology]",
+            unit="doc",
+        ):
+            task7_graph_doc_name = str(task7_graph_doc_name)
+            task7_graph_ontology_row = task7_graph_cached_ontology.get(task7_graph_doc_name)
+            if task7_graph_ontology_row is None and RUN_EXPENSIVE_EVALS:
+                task7_graph_ontology_row = task7_graph_infer_document_ontology(
+                    task7_graph_doc_name,
+                    task7_graph_doc_df,
+                )
+                with task7_graph_document_ontology_cache_path.open(
+                    "a",
+                    encoding="utf-8",
+                ) as task7_graph_cache_file:
+                    task7_graph_cache_file.write(
+                        json.dumps(task7_graph_ontology_row, ensure_ascii=True) + "\n"
+                    )
+            if task7_graph_ontology_row is None:
+                task7_graph_ontology_row = task7_graph_fallback_document_ontology(
+                    task7_graph_doc_name,
+                    task7_graph_doc_df,
+                )
+            task7_graph_ontology_rows.append(task7_graph_ontology_row)
+        return pd.DataFrame(task7_graph_ontology_rows)
+
+    task7_graph_document_ontology_df = task7_graph_build_document_ontology_table()
+    if not task7_graph_document_ontology_df.empty and not task7_graph_chunk_nodes_df.empty:
+        task7_graph_ontology_lookup = task7_graph_document_ontology_df.set_index(
+            "doc_name"
+        )
+        task7_graph_chunk_nodes_df["category"] = task7_graph_chunk_nodes_df[
+            "doc_name"
+        ].map(task7_graph_ontology_lookup["category"]).fillna(
+            task7_graph_chunk_nodes_df["category"]
+        )
+        task7_graph_chunk_nodes_df["year"] = task7_graph_chunk_nodes_df["doc_name"].map(
+            task7_graph_ontology_lookup["year"]
+        ).fillna(task7_graph_chunk_nodes_df["year"])
+
+    class Task7GraphQueryRoute(_BaseModel):
+        company: str = ""
+        year: str = ""
+        category: str = ""
+        metric_terms: list[str] = _Field(default_factory=list)
+        confidence: float = 0.0
+
+        @_field_validator("year", mode="before")
+        @classmethod
+        def coerce_year(cls, task7_graph_year_value):
+            return "" if task7_graph_year_value is None else str(task7_graph_year_value)
+
+    def task7_graph_regex_route(task7_graph_question: str) -> Task7GraphQueryRoute:
+        task7_graph_question_lower = task7_graph_question.lower()
+        task7_graph_companies = sorted(
+            {
+                str(task7_graph_company)
+                for task7_graph_company in referenced_documents_df["company"].dropna().unique()
+                if str(task7_graph_company).strip()
+            },
+            key=len,
+            reverse=True,
+        )
+        task7_graph_company = ""
+        for task7_graph_candidate_company in task7_graph_companies:
+            if task7_graph_candidate_company.lower() in task7_graph_question_lower:
+                task7_graph_company = task7_graph_candidate_company
+                break
+        task7_graph_year_match = re.search(r"(?:FY|fiscal year|year)?\s*(20\d{2})", task7_graph_question, re.I)
+        task7_graph_category = ""
+        if re.search(r"\bQ[1-4]\b|quarter", task7_graph_question, re.I):
+            task7_graph_category = "10Q"
+        elif re.search(r"\bFY\b|fiscal year|annual|10-k|10k", task7_graph_question, re.I):
+            task7_graph_category = "10K"
+        task7_graph_metric_terms = [
+            task7_graph_match.group(0).lower()
+            for task7_graph_match in re.finditer(
+                r"\b(cash|revenue|sales|margin|ebitda|ebitdar|assets|liabilities|debt|inventory|working capital|capex|dividend|income|earnings)\b",
+                task7_graph_question,
+                re.I,
+            )
+        ]
+        return Task7GraphQueryRoute(
+            company=task7_graph_company,
+            year=task7_graph_year_match.group(1) if task7_graph_year_match else "",
+            category=task7_graph_category,
+            metric_terms=sorted(set(task7_graph_metric_terms)),
+            confidence=0.45 if task7_graph_company or task7_graph_year_match else 0.0,
+        )
+
+    def task7_graph_route_query(task7_graph_question: str) -> dict:
+        task7_graph_regex_result = task7_graph_regex_route(task7_graph_question)
+        if not NVIDIA_API_KEY:
+            return task7_graph_regex_result.model_dump()
+        try:
+            task7_graph_llm_result = task7_graph_call_and_parse(
+                task7_graph_messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract retrieval filters from the finance question. "
+                            "Use only information stated in the question. "
+                            "Return JSON with company, year, category, metric_terms, confidence. "
+                            "category must be one of 10K, 10Q, 8K, earnings, or empty string."
+                        ),
+                    },
+                    {"role": "user", "content": task7_graph_question},
+                ],
+                task7_graph_model_cls=Task7GraphQueryRoute,
+            )
+        except (_ValidationError, Exception) as task7_graph_route_exc:
+            print(f"[task7_graph_route] Falling back to regex route: {repr(task7_graph_route_exc)[:200]}")
+            return task7_graph_regex_result.model_dump()
+
+        task7_graph_merged = task7_graph_llm_result.model_dump()
+        task7_graph_regex_dump = task7_graph_regex_result.model_dump()
+        for task7_graph_route_key in ["company", "year", "category"]:
+            if not task7_graph_merged.get(task7_graph_route_key):
+                task7_graph_merged[task7_graph_route_key] = task7_graph_regex_dump.get(
+                    task7_graph_route_key,
+                    "",
+                )
+        task7_graph_metric_terms = sorted(
+            set(task7_graph_merged.get("metric_terms", []))
+            | set(task7_graph_regex_dump.get("metric_terms", []))
+        )
+        task7_graph_merged["metric_terms"] = task7_graph_metric_terms
+        return task7_graph_merged
+
+    def task7_graph_filter_indices(
+        task7_graph_route: dict,
+        *,
+        task7_graph_min_candidates: int = 40,
+    ) -> set[int]:
+        if task7_graph_chunk_nodes_df.empty:
+            return set()
+        task7_graph_candidate_df = task7_graph_chunk_nodes_df
+        task7_graph_filters = [
+            ("company", task7_graph_route.get("company", "")),
+            ("year", task7_graph_route.get("year", "")),
+            ("category", task7_graph_route.get("category", "")),
+        ]
+        for task7_graph_filter_count in range(len(task7_graph_filters), -1, -1):
+            task7_graph_filtered_df = task7_graph_candidate_df
+            for task7_graph_filter_column, task7_graph_filter_value in task7_graph_filters[
+                :task7_graph_filter_count
+            ]:
+                if str(task7_graph_filter_value).strip():
+                    task7_graph_filtered_df = task7_graph_filtered_df[
+                        task7_graph_filtered_df[task7_graph_filter_column]
+                        .astype(str)
+                        .str.lower()
+                        == str(task7_graph_filter_value).lower()
+                    ]
+            if len(task7_graph_filtered_df) >= task7_graph_min_candidates:
+                return set(task7_graph_filtered_df["faiss_index"].astype(int).tolist())
+        return set(task7_graph_chunk_nodes_df["faiss_index"].astype(int).tolist())
+
+    def task7_graph_semantic_rank(
+        task7_graph_query: str,
+        *,
+        task7_graph_candidate_indices: set[int] | None = None,
+        task7_graph_fetch_k: int = 20,
+    ) -> list[dict]:
+        if task7_graph_vectorstore is None:
+            return []
+        if not task7_graph_candidate_indices:
+            task7_graph_docs = task7_graph_vectorstore.similarity_search(
+                task7_graph_query,
+                k=task7_graph_fetch_k,
+            )
+            return [
+                task7_graph_doc_to_chunk(
+                    task7_graph_doc,
+                    task7_graph_rank=task7_graph_doc_rank,
+                )
+                for task7_graph_doc_rank, task7_graph_doc in enumerate(
+                    task7_graph_docs,
+                    start=1,
+                )
+            ]
+
+        task7_graph_query_vector = np.array(
+            task7_graph_vectorstore.embedding_function.embed_query(task7_graph_query),
+            dtype=np.float32,
+        )
+        task7_graph_scored_indices = []
+        for task7_graph_candidate_index in task7_graph_candidate_indices:
+            task7_graph_chunk_vector = np.array(
+                task7_graph_vectorstore.index.reconstruct(int(task7_graph_candidate_index)),
+                dtype=np.float32,
+            )
+            task7_graph_distance = float(
+                np.linalg.norm(task7_graph_query_vector - task7_graph_chunk_vector)
+            )
+            task7_graph_scored_indices.append(
+                (task7_graph_distance, int(task7_graph_candidate_index))
+            )
+        task7_graph_scored_indices.sort(key=lambda task7_graph_item: task7_graph_item[0])
+
+        task7_graph_docstore = task7_graph_vectorstore.docstore._dict
+        task7_graph_ranked_chunks = []
+        for task7_graph_rank, (
+            task7_graph_distance,
+            task7_graph_faiss_index,
+        ) in enumerate(task7_graph_scored_indices[:task7_graph_fetch_k], start=1):
+            task7_graph_docstore_id = task7_graph_vectorstore.index_to_docstore_id[
+                task7_graph_faiss_index
+            ]
+            task7_graph_doc = task7_graph_docstore[task7_graph_docstore_id]
+            task7_graph_ranked_chunks.append(
+                task7_graph_doc_to_chunk(
+                    task7_graph_doc,
+                    task7_graph_chunk_id=f"chunk_{task7_graph_faiss_index}",
+                    task7_graph_faiss_index=task7_graph_faiss_index,
+                    task7_graph_score=-task7_graph_distance,
+                    task7_graph_rank=task7_graph_rank,
+                )
+            )
+        return task7_graph_ranked_chunks
+
+    def task7_graph_expand_neighbors(
+        task7_graph_seed_chunks: list[dict],
+        *,
+        task7_graph_final_k: int,
+        task7_graph_page_radius: int = 1,
+    ) -> list[dict]:
+        if task7_graph_chunk_nodes_df.empty:
+            return task7_graph_seed_chunks[:task7_graph_final_k]
+        task7_graph_scored = {}
+        for task7_graph_seed_rank, task7_graph_seed_chunk in enumerate(
+            task7_graph_seed_chunks,
+            start=1,
+        ):
+            task7_graph_doc_name = task7_graph_seed_chunk.get("doc_name", "")
+            try:
+                task7_graph_page = int(task7_graph_seed_chunk.get("page_number", -10000))
+            except (TypeError, ValueError):
+                task7_graph_page = -10000
+            task7_graph_neighbor_df = task7_graph_chunk_nodes_df[
+                (task7_graph_chunk_nodes_df["doc_name"] == task7_graph_doc_name)
+                & (
+                    task7_graph_chunk_nodes_df["page_number"]
+                    .astype(str)
+                    .str.fullmatch(r"\d+")
+                )
+            ].copy()
+            if task7_graph_neighbor_df.empty:
+                continue
+            task7_graph_neighbor_df["page_int"] = task7_graph_neighbor_df[
+                "page_number"
+            ].astype(int)
+            task7_graph_neighbor_df = task7_graph_neighbor_df[
+                (
+                    task7_graph_neighbor_df["page_int"]
+                    .sub(task7_graph_page)
+                    .abs()
+                    <= task7_graph_page_radius
+                )
+            ]
+            task7_graph_base_score = 1.0 / (task7_graph_seed_rank + 1)
+            for task7_graph_neighbor_row in task7_graph_neighbor_df.to_dict("records"):
+                task7_graph_neighbor_index = int(task7_graph_neighbor_row["faiss_index"])
+                task7_graph_page_delta = abs(
+                    int(task7_graph_neighbor_row["page_int"]) - task7_graph_page
+                )
+                task7_graph_neighbor_score = task7_graph_base_score * (
+                    1.0 if task7_graph_page_delta == 0 else 0.55
+                )
+                task7_graph_existing = task7_graph_scored.get(task7_graph_neighbor_index)
+                if (
+                    task7_graph_existing is None
+                    or task7_graph_neighbor_score > task7_graph_existing[0]
+                ):
+                    task7_graph_scored[task7_graph_neighbor_index] = (
+                        task7_graph_neighbor_score,
+                        task7_graph_neighbor_row,
+                    )
+        task7_graph_ranked_neighbors = sorted(
+            task7_graph_scored.values(),
+            key=lambda task7_graph_item: task7_graph_item[0],
+            reverse=True,
+        )
+        return [
+            {
+                "chunk_id": task7_graph_neighbor_row["chunk_id"],
+                "faiss_index": int(task7_graph_neighbor_row["faiss_index"]),
+                "rank": task7_graph_neighbor_rank,
+                "score": task7_graph_neighbor_score,
+                "doc_name": task7_graph_neighbor_row["doc_name"],
+                "page_number": task7_graph_neighbor_row["page_number"],
+                "company": task7_graph_neighbor_row["company"],
+                "doc_period": task7_graph_neighbor_row["doc_period"],
+                "year": task7_graph_neighbor_row["year"],
+                "category": task7_graph_neighbor_row["category"],
+                "content": task7_graph_neighbor_row["content"],
+            }
+            for task7_graph_neighbor_rank, (
+                task7_graph_neighbor_score,
+                task7_graph_neighbor_row,
+            ) in enumerate(task7_graph_ranked_neighbors[:task7_graph_final_k], start=1)
+        ]
+
+    def task7_graph_cluster_boost(
+        task7_graph_query: str,
+        task7_graph_route: dict,
+        *,
+        task7_graph_final_k: int,
+    ) -> list[dict]:
+        task7_graph_candidates = task7_graph_filter_indices(
+            task7_graph_route,
+            task7_graph_min_candidates=40,
+        )
+        task7_graph_seed_chunks = task7_graph_semantic_rank(
+            task7_graph_query,
+            task7_graph_candidate_indices=task7_graph_candidates,
+            task7_graph_fetch_k=30,
+        )
+        return task7_graph_expand_neighbors(
+            task7_graph_seed_chunks,
+            task7_graph_final_k=task7_graph_final_k,
+            task7_graph_page_radius=1,
+        )
+
+    def task7_graph_soft_metadata_boost(
+        task7_graph_seed_chunks: list[dict],
+        task7_graph_route: dict,
+        *,
+        task7_graph_final_k: int,
+    ) -> list[dict]:
+        task7_graph_boosted_chunks = []
+        for task7_graph_rank, task7_graph_chunk in enumerate(
+            task7_graph_seed_chunks,
+            start=1,
+        ):
+            task7_graph_boost = 0.0
+            if (
+                str(task7_graph_route.get("company", "")).strip()
+                and str(task7_graph_chunk.get("company", "")).lower()
+                == str(task7_graph_route.get("company", "")).lower()
+            ):
+                task7_graph_boost += 0.20
+            if (
+                str(task7_graph_route.get("year", "")).strip()
+                and str(task7_graph_chunk.get("year", "")).lower()
+                == str(task7_graph_route.get("year", "")).lower()
+            ):
+                task7_graph_boost += 0.10
+            if (
+                str(task7_graph_route.get("category", "")).strip()
+                and str(task7_graph_chunk.get("category", "")).lower()
+                == str(task7_graph_route.get("category", "")).lower()
+            ):
+                task7_graph_boost += 0.08
+            task7_graph_boosted_chunks.append(
+                {
+                    **task7_graph_chunk,
+                    "rank": task7_graph_rank,
+                    "score": (1.0 / (task7_graph_rank + 1)) + task7_graph_boost,
+                }
+            )
+        return sorted(
+            task7_graph_boosted_chunks,
+            key=lambda task7_graph_chunk: task7_graph_chunk.get("score", 0.0),
+            reverse=True,
+        )[:task7_graph_final_k]
+
+    return (
+        task7_graph_cluster_boost,
+        task7_graph_expand_neighbors,
+        task7_graph_filter_indices,
+        task7_graph_route_query,
+        task7_graph_semantic_rank,
+        task7_graph_soft_metadata_boost,
+        task7_graph_vectorstore_config,
+    )
+
+
+@app.cell
+def _(
+    FAITHFULNESS_LIMIT,
+    FORCE_RERUN,
+    GENERATION_MODEL,
+    JUDGE_MODEL,
+    PAGE_HIT_K_VALUES,
+    RAG_SYSTEM_PROMPT_V1,
+    RETRY_ERRORS,
+    RUN_EXPENSIVE_EVALS,
+    TASK7_EXPERIMENT_CACHE_PATH,
+    answer_from_chunks,
+    evidence_page_numbers,
+    financebench_df,
+    judge_correctness,
+    package_rows,
+    pd,
+    run_cached_rows,
+    score_faithfulness_with_ragas,
+    task7_graph_cluster_boost,
+    task7_graph_expand_neighbors,
+    task7_graph_filter_indices,
+    task7_graph_route_query,
+    task7_graph_semantic_rank,
+    task7_graph_soft_metadata_boost,
+    task7_graph_vectorstore_config,
+):
+    task7_graph_experiments = [
+        {
+            "experiment": "metadata_filter_gemini_2_k8",
+            "change": "Infer company/year/filing type from the query, filter Gemini candidates, then generate with k=8",
+            "hypothesis": "Query-derived metadata filters should reduce wrong-company and wrong-filing retrieval without using benchmark evidence.",
+            "retrieval_mode": "metadata_filter",
+            "k_for_generation": 8,
+            "semantic_fetch_k": 30,
+        },
+        {
+            "experiment": "neighbor_context_gemini_2_k8",
+            "change": "Retrieve Gemini top-20, expand same-document page neighbors, then generate with k=8",
+            "hypothesis": "Neighbor expansion should recover nearby table context when the closest chunk lands on an adjacent page or split boundary.",
+            "retrieval_mode": "neighbor_context",
+            "k_for_generation": 8,
+            "semantic_fetch_k": 20,
+        },
+        {
+            "experiment": "ontology_cluster_boost_gemini_2_k8",
+            "change": "Combine query metadata filters with same-document/page-neighbor cluster boosting, then generate with k=8",
+            "hypothesis": "Combining metadata filtering and local chunk connections should improve evidence coverage more than either signal alone.",
+            "retrieval_mode": "metadata_neighbor_boost",
+            "k_for_generation": 8,
+            "semantic_fetch_k": 30,
+        },
+        {
+            "experiment": "soft_metadata_boost_gemini_2_k8",
+            "change": "Retrieve Gemini top-30, softly boost query-matching metadata, then generate with k=8",
+            "hypothesis": "Soft metadata boosts should preserve Gemini semantic recall while nudging same-company, same-year, and same-filing chunks upward.",
+            "retrieval_mode": "soft_metadata_boost",
+            "k_for_generation": 8,
+            "semantic_fetch_k": 30,
+        },
+    ]
+
+    def task7_graph_page_hit(row: dict, task7_graph_chunks: list[dict]) -> int:
+        task7_graph_expected_pages = set(evidence_page_numbers(row.get("evidence")))
+        task7_graph_retrieved_pages = {
+            int(task7_graph_chunk["page_number"])
+            for task7_graph_chunk in task7_graph_chunks
+            if task7_graph_chunk.get("doc_name") == row.get("doc_name")
+            and str(task7_graph_chunk.get("page_number", "")).isdigit()
+        }
+        return int(bool(task7_graph_expected_pages & task7_graph_retrieved_pages))
+
+    def task7_graph_retrieve(
+        task7_graph_experiment: dict,
+        task7_graph_query: str,
+        *,
+        task7_graph_fetch_k: int,
+    ) -> list[dict]:
+        task7_graph_route = task7_graph_route_query(task7_graph_query)
+        if task7_graph_experiment["retrieval_mode"] == "metadata_filter":
+            task7_graph_candidate_indices = task7_graph_filter_indices(
+                task7_graph_route,
+                task7_graph_min_candidates=40,
+            )
+            return task7_graph_semantic_rank(
+                task7_graph_query,
+                task7_graph_candidate_indices=task7_graph_candidate_indices,
+                task7_graph_fetch_k=task7_graph_fetch_k,
+            )
+        if task7_graph_experiment["retrieval_mode"] == "neighbor_context":
+            task7_graph_seed_chunks = task7_graph_semantic_rank(
+                task7_graph_query,
+                task7_graph_candidate_indices=None,
+                task7_graph_fetch_k=task7_graph_experiment["semantic_fetch_k"],
+            )
+            return task7_graph_expand_neighbors(
+                task7_graph_seed_chunks,
+                task7_graph_final_k=task7_graph_fetch_k,
+                task7_graph_page_radius=1,
+            )
+        if task7_graph_experiment["retrieval_mode"] == "soft_metadata_boost":
+            task7_graph_seed_chunks = task7_graph_semantic_rank(
+                task7_graph_query,
+                task7_graph_candidate_indices=None,
+                task7_graph_fetch_k=task7_graph_experiment["semantic_fetch_k"],
+            )
+            return task7_graph_soft_metadata_boost(
+                task7_graph_seed_chunks,
+                task7_graph_route,
+                task7_graph_final_k=task7_graph_fetch_k,
+            )
+        return task7_graph_cluster_boost(
+            task7_graph_query,
+            task7_graph_route,
+            task7_graph_final_k=task7_graph_fetch_k,
+        )
+
+    task7_graph_rows = [
+        {
+            **task7_graph_row,
+            "_faithfulness_eval": task7_graph_row_index < FAITHFULNESS_LIMIT,
+        }
+        for task7_graph_row_index, task7_graph_row in enumerate(
+            financebench_df.sort_values("financebench_id").to_dict("records")
+        )
+    ]
+
+    def task7_graph_run_experiment(task7_graph_experiment: dict) -> pd.DataFrame:
+        def run_task7_graph_one(task7_graph_row: dict) -> dict:
+            task7_graph_query = str(task7_graph_row["question"])
+            task7_graph_retrieved_chunks = task7_graph_retrieve(
+                task7_graph_experiment,
+                task7_graph_query,
+                task7_graph_fetch_k=max(
+                    task7_graph_experiment["k_for_generation"],
+                    max(PAGE_HIT_K_VALUES),
+                ),
+            )
+            task7_graph_generation_chunks = task7_graph_retrieved_chunks[
+                : task7_graph_experiment["k_for_generation"]
+            ]
+            task7_graph_rag_result = answer_from_chunks(
+                query=task7_graph_query,
+                chunks=task7_graph_generation_chunks,
+                model=GENERATION_MODEL,
+                system_prompt=RAG_SYSTEM_PROMPT_V1,
+                include_programmatic_sources=True,
+            )
+            task7_graph_judged = judge_correctness(
+                question=task7_graph_query,
+                ground_truth=str(task7_graph_row["answer"]),
+                candidate_answer=task7_graph_rag_result["answer"],
+            )
+            task7_graph_faithfulness = (
+                score_faithfulness_with_ragas(
+                    question=task7_graph_query,
+                    answer=task7_graph_rag_result["answer"],
+                    retrieved_contexts=[
+                        task7_graph_chunk["content"]
+                        for task7_graph_chunk in task7_graph_generation_chunks
+                    ],
+                )
+                if task7_graph_row.get("_faithfulness_eval")
+                else None
+            )
+            return {
+                "experiment": task7_graph_experiment["experiment"],
+                "question": task7_graph_row["question"],
+                "RAG_answer": task7_graph_rag_result["answer"],
+                "ground_truth": task7_graph_row["answer"],
+                "faithfulness": task7_graph_faithfulness,
+                **{
+                    f"page_hit_at_{task7_graph_k}": task7_graph_page_hit(
+                        task7_graph_row,
+                        task7_graph_retrieved_chunks[:task7_graph_k],
+                    )
+                    for task7_graph_k in PAGE_HIT_K_VALUES
+                },
+                **task7_graph_judged,
+            }
+
+        task7_graph_attempt_rows_df = run_cached_rows(
+            task=f"task7_{task7_graph_experiment['experiment']}_experiment",
+            rows=package_rows(task7_graph_rows),
+            cache_path=TASK7_EXPERIMENT_CACHE_PATH,
+            config_payload={
+                **task7_graph_experiment,
+                **task7_graph_vectorstore_config,
+                "generator_model": GENERATION_MODEL,
+                "judge_model": JUDGE_MODEL,
+                "prompt": RAG_SYSTEM_PROMPT_V1,
+                "max_workers": 5,
+            },
+            input_payload_fn=lambda task7_graph_row: {
+                "financebench_id": task7_graph_row["financebench_id"],
+                "question": task7_graph_row["question"],
+                "answer": task7_graph_row["answer"],
+            },
+            run_one_fn=run_task7_graph_one,
+            force_rerun=FORCE_RERUN,
+            retry_errors=RETRY_ERRORS,
+            allow_run=RUN_EXPENSIVE_EVALS,
+            max_workers=5,
+        )
+
+        task7_graph_result_row = {
+            "experiment": task7_graph_experiment["experiment"],
+            "change": task7_graph_experiment["change"],
+            "correctness": "",
+            "faithfulness": "",
+            **{f"page_hit_at_{task7_graph_k}": "" for task7_graph_k in PAGE_HIT_K_VALUES},
+            "hypothesis": task7_graph_experiment["hypothesis"],
+        }
+        if not task7_graph_attempt_rows_df.empty:
+            if "correctness" in task7_graph_attempt_rows_df.columns:
+                task7_graph_result_row["correctness"] = (
+                    task7_graph_attempt_rows_df["correctness"].eq("correct").mean()
+                )
+            if "faithfulness" in task7_graph_attempt_rows_df.columns:
+                task7_graph_result_row["faithfulness"] = pd.to_numeric(
+                    task7_graph_attempt_rows_df["faithfulness"],
+                    errors="coerce",
+                ).mean()
+            for task7_graph_k in PAGE_HIT_K_VALUES:
+                task7_graph_column = f"page_hit_at_{task7_graph_k}"
+                if task7_graph_column in task7_graph_attempt_rows_df.columns:
+                    task7_graph_result_row[task7_graph_column] = pd.to_numeric(
+                        task7_graph_attempt_rows_df[task7_graph_column],
+                        errors="coerce",
+                    ).mean()
+        return pd.DataFrame([task7_graph_result_row])
+
+    task7_metadata_filter_gemini_k8_results_df = task7_graph_run_experiment(
+        task7_graph_experiments[0]
+    )
+    task7_neighbor_context_gemini_k8_results_df = task7_graph_run_experiment(
+        task7_graph_experiments[1]
+    )
+    task7_ontology_cluster_boost_gemini_k8_results_df = task7_graph_run_experiment(
+        task7_graph_experiments[2]
+    )
+    task7_soft_metadata_boost_gemini_k8_results_df = task7_graph_run_experiment(
+        task7_graph_experiments[3]
+    )
+    return (
+        task7_metadata_filter_gemini_k8_results_df,
+        task7_neighbor_context_gemini_k8_results_df,
+        task7_ontology_cluster_boost_gemini_k8_results_df,
+        task7_soft_metadata_boost_gemini_k8_results_df,
+    )
+
+
+@app.cell
+def _(
     pd,
     task7_embedding_k8_results_df,
     task7_embedding_results_df,
     task7_hybrid_bm25_gemini_k8_results_df,
+    task7_metadata_filter_gemini_k8_results_df,
+    task7_neighbor_context_gemini_k8_results_df,
+    task7_ontology_cluster_boost_gemini_k8_results_df,
     task7_results_df,
+    task7_soft_metadata_boost_gemini_k8_results_df,
 ):
     task7_results_combined_df = pd.concat(
         [
@@ -3370,6 +4446,10 @@ def _(
             task7_embedding_results_df,
             task7_embedding_k8_results_df,
             task7_hybrid_bm25_gemini_k8_results_df,
+            task7_metadata_filter_gemini_k8_results_df,
+            task7_neighbor_context_gemini_k8_results_df,
+            task7_ontology_cluster_boost_gemini_k8_results_df,
+            task7_soft_metadata_boost_gemini_k8_results_df,
         ],
         ignore_index=True,
     )
